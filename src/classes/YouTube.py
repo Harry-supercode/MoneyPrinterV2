@@ -276,8 +276,7 @@ class YouTube:
 
         self._assert_firefox_profile_available()
 
-        self.options.add_argument("-profile")
-        self.options.add_argument(self._fp_profile_path)
+        self.options.profile = self._fp_profile_path
 
         # Set the service
         self.service: Service = Service(GeckoDriverManager().install())

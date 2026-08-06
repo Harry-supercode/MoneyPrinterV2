@@ -70,8 +70,7 @@ class DubBrowserDiscovery:
         if profile_path:
             if not os.path.isdir(profile_path):
                 raise ValueError(f"dub_pipeline.browser_profile does not exist: {profile_path}")
-            options.add_argument("-profile")
-            options.add_argument(profile_path)
+            options.profile = profile_path
 
         service = Service(GeckoDriverManager().install())
         return webdriver.Firefox(service=service, options=options)

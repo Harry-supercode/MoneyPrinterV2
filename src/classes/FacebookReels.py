@@ -71,8 +71,7 @@ class FacebookReels:
         self._assert_firefox_profile_available()
 
         self.options = Options()
-        self.options.add_argument("-profile")
-        self.options.add_argument(self.fp_profile_path)
+        self.options.profile = self.fp_profile_path
 
         self.service = Service(GeckoDriverManager().install())
         self.browser = webdriver.Firefox(service=self.service, options=self.options)

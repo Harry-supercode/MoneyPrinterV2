@@ -57,8 +57,7 @@ class Twitter:
             )
 
         # Set the profile path
-        self.options.add_argument("-profile")
-        self.options.add_argument(fp_profile_path)
+        self.options.profile = fp_profile_path
 
         # Set the service
         self.service: Service = Service(GeckoDriverManager().install())
