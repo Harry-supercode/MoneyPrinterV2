@@ -80,5 +80,169 @@ class PostBridgeConfigTests(unittest.TestCase):
         self.assertFalse(post_bridge_config["enabled"])
 
 
+class YouTubeTrendsConfigTests(unittest.TestCase):
+    def write_config(self, directory: str, payload: dict) -> None:
+        with open(os.path.join(directory, "config.json"), "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+
+    def test_missing_youtube_trends_uses_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.write_config(temp_dir, {})
+
+            with patch.object(config, "ROOT_DIR", temp_dir):
+                trends_config = config.get_youtube_trends_config()
+
+        self.assertFalse(trends_config["enabled"])
+        self.assertEqual(trends_config["source"], "google_trending_rss")
+        self.assertEqual(trends_config["geo"], "VN")
+        self.assertEqual(trends_config["hl"], "vi")
+
+    def test_youtube_trends_normalizes_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.write_config(
+                temp_dir,
+                {
+                    "youtube_trends": {
+                        "enabled": True,
+                        "source": "google_trending_rss",
+                        "geo": "us",
+                        "hl": "en-US",
+                        "category_filter": " EV ",
+                        "max_items": "100",
+                    }
+                },
+            )
+
+            with patch.object(config, "ROOT_DIR", temp_dir):
+                trends_config = config.get_youtube_trends_config()
+
+        self.assertTrue(trends_config["enabled"])
+        self.assertEqual(trends_config["geo"], "US")
+        self.assertEqual(trends_config["category_filter"], "EV")
+        self.assertEqual(trends_config["max_items"], 25)
+
+
+class YouTubeBrandTopicsConfigTests(unittest.TestCase):
+    def write_config(self, directory: str, payload: dict) -> None:
+        with open(os.path.join(directory, "config.json"), "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+
+    def test_missing_youtube_brand_topics_uses_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.write_config(temp_dir, {})
+
+            with patch.object(config, "ROOT_DIR", temp_dir):
+                brand_topics_config = config.get_youtube_brand_topics_config()
+
+        self.assertFalse(brand_topics_config["enabled"])
+        self.assertIn("HIEMEE business ecosystem", brand_topics_config["keywords"])
+
+    def test_youtube_brand_topics_normalizes_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.write_config(
+                temp_dir,
+                {
+                    "youtube_brand_topics": {
+                        "enabled": True,
+                        "keywords": [" Hie-Palace ", "", "HieRealty"],
+                        "concepts": [" Cashflow -> Technology -> Assets ", ""],
+                    }
+                },
+            )
+
+            with patch.object(config, "ROOT_DIR", temp_dir):
+                brand_topics_config = config.get_youtube_brand_topics_config()
+
+        self.assertTrue(brand_topics_config["enabled"])
+        self.assertEqual(brand_topics_config["keywords"], ["Hie-Palace", "HieRealty"])
+        self.assertEqual(
+            brand_topics_config["concepts"],
+            ["Cashflow -> Technology -> Assets"],
+        )
+
+
+class YouTubeEnglishModeConfigTests(unittest.TestCase):
+    def write_config(self, directory: str, payload: dict) -> None:
+        with open(os.path.join(directory, "config.json"), "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+
+    def test_missing_youtube_english_mode_uses_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.write_config(temp_dir, {})
+
+            with patch.object(config, "ROOT_DIR", temp_dir):
+                english_mode = config.get_youtube_english_mode_config()
+
+        self.assertFalse(english_mode["enabled"])
+        self.assertEqual(english_mode["language"], "English")
+        self.assertEqual(english_mode["voice"], "en-US-GuyNeural")
+        self.assertEqual(english_mode["fallback_voices"], ["en-US-JennyNeural"])
+
+    def test_youtube_english_mode_normalizes_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.write_config(
+                temp_dir,
+                {
+                    "youtube_english_mode": {
+                        "enabled": True,
+                        "language": " English ",
+                        "voice": " en-GB-RyanNeural ",
+                        "fallback_voices": [" en-US-JennyNeural ", "", "en-US-AriaNeural"],
+                    }
+                },
+            )
+
+            with patch.object(config, "ROOT_DIR", temp_dir):
+                english_mode = config.get_youtube_english_mode_config()
+
+        self.assertTrue(english_mode["enabled"])
+        self.assertEqual(english_mode["language"], "English")
+        self.assertEqual(english_mode["voice"], "en-GB-RyanNeural")
+        self.assertEqual(
+            english_mode["fallback_voices"],
+            ["en-US-JennyNeural", "en-US-AriaNeural"],
+        )
+
+
+class AIVideoConfigTests(unittest.TestCase):
+    def write_config(self, directory: str, payload: dict) -> None:
+        with open(os.path.join(directory, "config.json"), "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+
+    def test_missing_ai_video_uses_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.write_config(temp_dir, {})
+
+            with patch.object(config, "ROOT_DIR", temp_dir):
+                ai_video_config = config.get_ai_video_config()
+
+        self.assertFalse(ai_video_config["enabled"])
+        self.assertEqual(ai_video_config["provider"], "runway")
+        self.assertEqual(ai_video_config["mode"], "hook_only")
+        self.assertEqual(ai_video_config["model"], "gen4.5")
+        self.assertEqual(ai_video_config["duration"], "5")
+        self.assertEqual(ai_video_config["ratio"], "720:1280")
+
+    def test_ai_video_normalizes_timeout_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.write_config(
+                temp_dir,
+                {
+                    "ai_video": {
+                        "enabled": True,
+                        "poll_interval_seconds": "1",
+                        "timeout_seconds": "10",
+                    }
+                },
+            )
+
+            with patch.object(config, "ROOT_DIR", temp_dir):
+                ai_video_config = config.get_ai_video_config()
+
+        self.assertTrue(ai_video_config["enabled"])
+        self.assertEqual(ai_video_config["poll_interval_seconds"], 3)
+        self.assertEqual(ai_video_config["timeout_seconds"], 60)
+
+
 if __name__ == "__main__":
     unittest.main()

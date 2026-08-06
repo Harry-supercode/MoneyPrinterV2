@@ -8,3 +8,8 @@ niche.txt
 *.exe
 auto.sh
 .DS_Store
+output/
+.playwright-firefox-profile/
+*.log
+config.json.bak
+.codex-crontab*

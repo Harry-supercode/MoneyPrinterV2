@@ -114,6 +114,9 @@ PY
 echo "[setup] Running local preflight..."
 "$PYTHON_BIN" scripts/preflight_local.py || true
 
+echo "[setup] Syncing launcher scripts to Application Support..."
+bash scripts/sync_launchers_to_support.sh || true
+
 echo ""
 echo "[setup] Done."
 echo "[setup] Start app with: source venv/bin/activate && python3 src/main.py"

@@ -1,0 +1,10 @@
+from gtts import gTTS
+
+
+class TTS:
+    def __init__(self, voice: str = "vi"):
+        self._voice = voice
+
+    def synthesize(self, text: str, path: str):
+        tts = gTTS(text=text, lang="vi", slow=False)
+        tts.save(path)

@@ -3,11 +3,14 @@ import random
 import zipfile
 import requests
 import platform
+import json
 
 from status import *
 from config import *
 
 DEFAULT_SONG_ARCHIVE_URLS = []
+AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")
+SONG_HISTORY_FILE = "song_history.json"
 
 
 def close_running_selenium_instances() -> None:
@@ -82,7 +85,7 @@ def fetch_songs() -> None:
                 name
                 for name in os.listdir(files_dir)
                 if os.path.isfile(os.path.join(files_dir, name))
-                and name.lower().endswith((".mp3", ".wav", ".m4a", ".aac", ".ogg"))
+                and name.lower().endswith(AUDIO_EXTENSIONS)
             ]
             if len(existing_audio_files) > 0:
                 return
@@ -102,7 +105,7 @@ def fetch_songs() -> None:
                 with open(archive_path, "wb") as file:
                     file.write(response.content)
 
-                SAFE_EXTENSIONS = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")
+                SAFE_EXTENSIONS = AUDIO_EXTENSIONS
                 with zipfile.ZipFile(archive_path, "r") as zf:
                     for member in zf.namelist():
                         basename = os.path.basename(member)
@@ -134,6 +137,39 @@ def fetch_songs() -> None:
         error(f"Error occurred while fetching songs: {str(e)}")
 
 
+def get_song_history_path() -> str:
+    return os.path.join(ROOT_DIR, ".mp", SONG_HISTORY_FILE)
+
+
+def get_audio_files(songs_dir: str) -> list[str]:
+    return sorted(
+        name
+        for name in os.listdir(songs_dir)
+        if os.path.isfile(os.path.join(songs_dir, name))
+        and name.lower().endswith(AUDIO_EXTENSIONS)
+    )
+
+
+def get_last_chosen_song() -> str:
+    history_path = get_song_history_path()
+    if not os.path.exists(history_path):
+        return ""
+
+    try:
+        with open(history_path, "r", encoding="utf-8") as file:
+            return str(json.load(file).get("last_song", ""))
+    except Exception:
+        return ""
+
+
+def save_last_chosen_song(song: str) -> None:
+    history_path = get_song_history_path()
+    os.makedirs(os.path.dirname(history_path), exist_ok=True)
+
+    with open(history_path, "w", encoding="utf-8") as file:
+        json.dump({"last_song": song}, file, indent=2)
+
+
 def choose_random_song() -> str:
     """
     Chooses a random song from the songs/ directory.
@@ -143,16 +179,19 @@ def choose_random_song() -> str:
     """
     try:
         songs_dir = os.path.join(ROOT_DIR, "Songs")
-        songs = [
-            name
-            for name in os.listdir(songs_dir)
-            if os.path.isfile(os.path.join(songs_dir, name))
-            and name.lower().endswith((".mp3", ".wav", ".m4a", ".aac", ".ogg"))
-        ]
+        songs = get_audio_files(songs_dir)
         if len(songs) == 0:
             raise RuntimeError("No audio files found in Songs directory")
-        song = random.choice(songs)
-        success(f" => Chose song: {song}")
+
+        last_song = get_last_chosen_song()
+        choices = [song for song in songs if song != last_song]
+        if len(choices) == 0:
+            choices = songs
+
+        song = random.choice(choices)
+        save_last_chosen_song(song)
+
+        success(f" => Chose song: {song} ({len(songs)} available)")
         return os.path.join(ROOT_DIR, "Songs", song)
     except Exception as e:
         error(f"Error occurred while choosing random song: {str(e)}")

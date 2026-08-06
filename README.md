@@ -3,9 +3,8 @@
 Sponsored by Post Bridge
 
 <a href="https://post-bridge.com?atp=MoneyPrinter">
-  <img src="docs/repo/PostBridgeBanner.png" alt="Post Bridge integration banner" width="720" />
+	<img src="docs/repo/PostBridgeBanner.png" alt="Post Bridge integration banner" width="720" />
 </a>
-
 
 [![madewithlove](https://img.shields.io/badge/made_with-%E2%9D%A4-red?style=for-the-badge&labelColor=orange)](https://github.com/FujiwaraChoki/MoneyPrinterV2)
 
@@ -62,10 +61,90 @@ pip install -r requirements.txt
 
 ## Usage
 
+source venv/bin/activate
+
 ```bash
 # Run the application
+source venv/bin/activate
 python src/main.py
 ```
+
+### Cron quick start (macOS)
+
+```bash
+# 1) Đồng bộ launcher scripts vào Application Support
+bash scripts/sync_launchers_to_support.sh
+
+# 2) Cài cron tick mỗi 15 phút cho random scheduler
+(crontab -l 2>/dev/null; echo '*/15 * * * * /bin/zsh "$HOME/Library/Application Support/MoneyPrinterV2/run_random_scheduler.sh"') | crontab -
+
+# 3) Kiểm tra cron entry
+crontab -l
+
+# 4) Chạy thử 1 tick ngay lập tức
+/bin/zsh "$HOME/Library/Application Support/MoneyPrinterV2/run_random_scheduler.sh"
+
+# 5) Theo dõi log
+tail -f random_scheduler.log cron.log dub_cron.log
+```
+
+pkill -f Firefox
+python src/cron.py youtube 2e7b83ef-4608-4ba8-a7b5-3a56be6c102a llama3.2:latest
+
+venv/bin/python src/dub_cron.py "" llama3.2:latest
+
+crontab -l
+
+Theo dõi log:
+tail -f cron.log
+tail -f dub_cron.log
+
+pkill -f Firefox
+Kiểm tra cron đã bật scheduler:
+crontab -l
+
+Kết quả đúng phải có:
+_/15 _ \* \* \* /bin/zsh "/Users/harrytrinhtvf/Library/Application Support/MoneyPrinterV2/run_random_scheduler.sh"
+
+Xem lịch random hôm nay:
+cat .mp/random_scheduler_state.json
+
+Chạy thử scheduler 1 tick, không ép chạy job nếu chưa tới giờ:
+/bin/zsh "/Users/harrytrinhtvf/Library/Application Support/MoneyPrinterV2/run_random_scheduler.sh"
+
+Check log scheduler:
+tail -n 80 random_scheduler.log
+Check log YouTube job:
+tail -n 120 cron.log
+Check log dub job:
+tail -n 120 dub_cron.log
+
+Check launcher log trong Application Support:
+tail -n 80 "/Users/harrytrinhtvf/Library/Application Support/MoneyPrinterV2/youtube_short_launcher.log"
+tail -n 80 "/Users/harrytrinhtvf/Library/Application Support/MoneyPrinterV2/dub_launcher.log"
+
+Kiểm tra có job nào đang chạy/lock không:
+pgrep -fl "src/cron.py youtube|src/dub_cron.py"
+ls -ld /tmp/moneyprinterv2-\*.lock
+
+Kiểm tra preflight local:
+venv/bin/python scripts/preflight_local.py
+
+macOS note: nếu `cron` không cập nhật `random_scheduler.log` hoặc `.mp/random_scheduler_state.json`, nguyên nhân thường là tiến trình nền của `cron` không được macOS cho phép truy cập thư mục repo trong `Documents`. Hãy ưu tiên dùng cơ chế nào đã có quyền ghi log ổn định trên máy này. Scheduler sẽ gọi trực tiếp `run_youtube_short_job.sh` hoặc `run_dub_pipeline_job.sh`, đợi vài giây để thấy pid/lock/START log, rồi mới đánh dấu slot là launched.
+cp launchd/com.moneyprinterv2.random-scheduler.plist ~/Library/LaunchAgents/
+launchctl unload ~/Library/LaunchAgents/com.moneyprinterv2.random-scheduler.plist 2>/dev/null || true
+launchctl load ~/Library/LaunchAgents/com.moneyprinterv2.random-scheduler.plist
+launchctl kickstart -k gui/$(id -u)/com.moneyprinterv2.random-scheduler
+tail -f random_scheduler.log cron.log dub_cron.log
+
+Nếu muốn xem scheduler sẽ tạo lịch gì mà không launch job:
+venv/bin/python scripts/random_scheduler.py --generate-only
+
+Nếu muốn reset lịch random hôm nay:
+venv/bin/python scripts/random_scheduler.py --reset-today --generate-only
+
+Lệnh quan trọng nhất để theo dõi realtime:
+tail -f random_scheduler.log cron.log dub_cron.log
 
 ## Documentation
 
