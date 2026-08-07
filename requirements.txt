@@ -11,7 +11,7 @@ ollama
 edge-tts
 yt-dlp
 moviepy==1.0.3
-Pillow<10
+Pillow==10.4.0
 yagmail
 assemblyai
 faster-whisper

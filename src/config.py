@@ -59,6 +59,16 @@ def get_firefox_profile_path() -> str:
     with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
         return json.load(file)["firefox_profile"]
 
+def get_firefox_binary_path() -> str:
+    """
+    Gets the Firefox executable path from the config file.
+
+    Returns:
+        path (str): The Firefox executable path, or empty string if not set.
+    """
+    with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
+        return str(json.load(file).get("firefox_binary_path", "")).strip()
+
 def get_headless() -> bool:
     """
     Gets the headless flag from the config file.

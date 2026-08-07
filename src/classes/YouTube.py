@@ -19,6 +19,10 @@ from trends import get_youtube_topic_seed
 from uuid import uuid4
 from constants import *
 from typing import List
+from pillow_compat import patch_pillow_resampling_aliases
+
+patch_pillow_resampling_aliases()
+
 from moviepy.editor import *
 from termcolor import colored
 from selenium import webdriver
@@ -264,6 +268,9 @@ class YouTube:
 
         # Initialize the Firefox profile
         self.options: Options = Options()
+        firefox_binary_path = get_firefox_binary_path()
+        if firefox_binary_path:
+            self.options.binary_location = firefox_binary_path
 
         # Set headless state of browser
         if get_headless():
@@ -296,6 +303,7 @@ class YouTube:
             warning(
                 f"Found stale Firefox profile lock, but no active Firefox process: {lock_path}"
             )
+            self._clear_stale_firefox_locks()
             return
 
         raise RuntimeError(
@@ -324,6 +332,15 @@ class YouTube:
             return "\n".join(process_lines)
         except Exception:
             return ""
+
+    def _clear_stale_firefox_locks(self) -> None:
+        for lock_name in (".parentlock", "lock"):
+            lock_path = os.path.join(self._fp_profile_path, lock_name)
+            if os.path.exists(lock_path):
+                try:
+                    os.remove(lock_path)
+                except OSError as exc:
+                    warning(f"Could not remove stale Firefox lock {lock_path}: {exc}")
 
     @property
     def niche(self) -> str:

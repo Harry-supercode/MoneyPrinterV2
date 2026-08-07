@@ -46,6 +46,9 @@ class Twitter:
 
         # Initialize the Firefox profile
         self.options: Options = Options()
+        firefox_binary_path = get_firefox_binary_path()
+        if firefox_binary_path:
+            self.options.binary_location = firefox_binary_path
 
         # Set headless state of browser
         if get_headless():

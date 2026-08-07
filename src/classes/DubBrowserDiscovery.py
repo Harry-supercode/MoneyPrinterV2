@@ -62,6 +62,9 @@ class DubBrowserDiscovery:
 
     def _open_browser(self) -> webdriver.Firefox:
         options = Options()
+        firefox_binary_path = get_firefox_binary_path()
+        if firefox_binary_path:
+            options.binary_location = firefox_binary_path
 
         if bool(self.config.get("discovery_headless", True)):
             options.add_argument("--headless")

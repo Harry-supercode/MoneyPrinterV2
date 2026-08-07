@@ -12,6 +12,7 @@ from webdriver_manager.firefox import GeckoDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+from config import get_firefox_binary_path
 from status import info, success, warning
 
 
@@ -27,12 +28,14 @@ class TikTok:
         self._assert_firefox_profile_available()
 
         self.options = Options()
+        firefox_binary_path = get_firefox_binary_path()
+        if firefox_binary_path:
+            self.options.binary_location = firefox_binary_path
 
         # TikTok upload needs visible browser for now
         # self.options.add_argument("--headless")
 
-        self.options.add_argument("-profile")
-        self.options.add_argument(self.fp_profile_path)
+        self.options.profile = self.fp_profile_path
 
         self.service = Service(GeckoDriverManager().install())
 
@@ -51,6 +54,7 @@ class TikTok:
             warning(
                 f"Found stale Firefox profile lock, but no active Firefox process: {lock_path}"
             )
+            self._clear_stale_firefox_locks()
             return
 
         raise RuntimeError(
@@ -79,6 +83,15 @@ class TikTok:
             return "\n".join(process_lines)
         except Exception:
             return ""
+
+    def _clear_stale_firefox_locks(self) -> None:
+        for lock_name in (".parentlock", "lock"):
+            lock_path = os.path.join(self.fp_profile_path, lock_name)
+            if os.path.exists(lock_path):
+                try:
+                    os.remove(lock_path)
+                except OSError as exc:
+                    warning(f"Could not remove stale Firefox lock {lock_path}: {exc}")
 
     def upload_video(self, video_path: str, caption: str = "") -> bool:
         if not os.path.exists(video_path):

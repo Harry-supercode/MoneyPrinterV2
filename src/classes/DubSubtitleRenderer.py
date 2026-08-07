@@ -1,5 +1,9 @@
 import os
 
+from pillow_compat import patch_pillow_resampling_aliases
+
+patch_pillow_resampling_aliases()
+
 from moviepy.config import change_settings
 from moviepy.editor import CompositeVideoClip, TextClip, VideoFileClip
 from moviepy.video.tools.subtitles import SubtitlesClip

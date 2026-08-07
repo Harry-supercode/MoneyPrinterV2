@@ -1,6 +1,7 @@
 {
   "verbose": true,
   "firefox_profile": "",
+  "firefox_binary_path": "",
   "headless": false,
   "ollama_base_url": "http://127.0.0.1:11434",
   "ollama_model": "",
