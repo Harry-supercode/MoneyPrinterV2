@@ -12,6 +12,7 @@ from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.firefox import GeckoDriverManager
 
 from config import get_firefox_binary_path
@@ -470,6 +471,39 @@ class FacebookReels:
         except Exception as exc:
             warning(f"Could not inspect Facebook caption candidates: {exc}")
 
+    def _find_file_input(self, driver: webdriver.Firefox) -> WebElement:
+        def find_input(current_driver: webdriver.Firefox):
+            inputs = current_driver.find_elements(By.XPATH, "//input[@type='file']")
+            for file_input in inputs:
+                try:
+                    return file_input
+                except Exception:
+                    continue
+            return False
+
+        try:
+            return WebDriverWait(driver, 45).until(find_input)
+        except Exception:
+            pass
+
+        upload_buttons = driver.find_elements(
+            By.XPATH,
+            "//div[@role='button' and ("
+            ".//span[contains(text(), 'Upload')] or "
+            ".//span[contains(text(), 'Tải lên')] or "
+            ".//span[contains(text(), 'Create')] or "
+            ".//span[contains(text(), 'Tạo')]"
+            ")]",
+        )
+        if upload_buttons:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", upload_buttons[0])
+            time.sleep(1)
+            driver.execute_script("arguments[0].click();", upload_buttons[0])
+
+        return WebDriverWait(driver, 45).until(
+            EC.presence_of_element_located((By.XPATH, "//input[@type='file']"))
+        )
+
     def upload_profile_reel(self, video_path: str, caption: str = "") -> bool:
         if not os.path.exists(video_path):
             raise ValueError(f"Video file not found: {video_path}")
@@ -482,12 +516,8 @@ class FacebookReels:
             time.sleep(10)
 
             info(" => Uploading Facebook Reel video...")
-            file_inputs = driver.find_elements(By.XPATH, "//input[@type='file']")
-
-            if not file_inputs:
-                raise Exception("Could not find Facebook file input")
-
-            file_inputs[0].send_keys(os.path.abspath(video_path))
+            file_input = self._find_file_input(driver)
+            file_input.send_keys(os.path.abspath(video_path))
             time.sleep(20)
 
             info(" => Clicking Next button...")

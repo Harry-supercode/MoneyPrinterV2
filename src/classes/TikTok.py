@@ -11,6 +11,7 @@ from selenium.webdriver.firefox.options import Options
 from webdriver_manager.firefox import GeckoDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import ElementClickInterceptedException
 
 from config import get_firefox_binary_path
 from status import info, success, warning
@@ -148,7 +149,7 @@ class TikTok:
                 raise Exception("Could not find TikTok Post/Publish button")
 
             time.sleep(5)
-            post_buttons[-1].click()
+            self._click_post_button(driver, post_buttons[-1])
 
             info(" => Waiting for TikTok publish...")
             time.sleep(20)
@@ -168,3 +169,38 @@ class TikTok:
                 pass
 
             return False
+
+    def _click_post_button(self, driver: webdriver.Firefox, post_button) -> None:
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", post_button)
+        time.sleep(1)
+        try:
+            post_button.click()
+            return
+        except ElementClickInterceptedException:
+            warning("TikTok Post button was covered by a suggestion popup. Closing overlay and retrying.")
+
+        try:
+            driver.switch_to.active_element.send_keys(Keys.ESCAPE)
+            time.sleep(1)
+        except Exception:
+            pass
+
+        try:
+            driver.execute_script(
+                """
+                for (const selector of [
+                    '[id^="mention-option"]',
+                    '[class*="suggestion"]',
+                    '[class*="Suggestion"]'
+                ]) {
+                    document.querySelectorAll(selector).forEach((el) => {
+                        el.style.display = 'none';
+                        el.style.pointerEvents = 'none';
+                    });
+                }
+                """
+            )
+        except Exception:
+            pass
+
+        driver.execute_script("arguments[0].click();", post_button)
