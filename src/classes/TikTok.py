@@ -14,6 +14,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import ElementClickInterceptedException
 
 from config import get_firefox_binary_path
+from firefox_profile import apply_firefox_profile
 from status import info, success, warning
 
 
@@ -36,7 +37,7 @@ class TikTok:
         # TikTok upload needs visible browser for now
         # self.options.add_argument("--headless")
 
-        self.options.profile = self.fp_profile_path
+        apply_firefox_profile(self.options, self.fp_profile_path)
 
         self.service = Service(GeckoDriverManager().install())
 

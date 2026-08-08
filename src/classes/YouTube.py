@@ -19,6 +19,7 @@ from trends import get_youtube_topic_seed
 from uuid import uuid4
 from constants import *
 from typing import List
+from firefox_profile import apply_firefox_profile
 from pillow_compat import patch_pillow_resampling_aliases
 
 patch_pillow_resampling_aliases()
@@ -283,7 +284,7 @@ class YouTube:
 
         self._assert_firefox_profile_available()
 
-        self.options.profile = self._fp_profile_path
+        apply_firefox_profile(self.options, self._fp_profile_path)
 
         # Set the service
         self.service: Service = Service(GeckoDriverManager().install())

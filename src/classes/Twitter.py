@@ -18,6 +18,7 @@ from selenium.webdriver.firefox.options import Options
 from webdriver_manager.firefox import GeckoDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from firefox_profile import apply_firefox_profile
 
 
 class Twitter:
@@ -60,7 +61,7 @@ class Twitter:
             )
 
         # Set the profile path
-        self.options.profile = fp_profile_path
+        apply_firefox_profile(self.options, fp_profile_path)
 
         # Set the service
         self.service: Service = Service(GeckoDriverManager().install())

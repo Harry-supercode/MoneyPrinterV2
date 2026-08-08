@@ -16,6 +16,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.firefox import GeckoDriverManager
 
 from config import get_firefox_binary_path
+from firefox_profile import apply_firefox_profile
 from status import info, success, warning
 # from src.status import info, success, warning
 
@@ -90,7 +91,7 @@ class FacebookReels:
         firefox_binary_path = get_firefox_binary_path()
         if firefox_binary_path:
             self.options.binary_location = firefox_binary_path
-        self.options.profile = self.fp_profile_path
+        apply_firefox_profile(self.options, self.fp_profile_path)
 
         self.service = Service(GeckoDriverManager().install())
         self.browser = webdriver.Firefox(service=self.service, options=self.options)

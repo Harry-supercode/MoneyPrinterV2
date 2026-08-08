@@ -12,6 +12,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.firefox.options import Options
 from webdriver_manager.firefox import GeckoDriverManager
+from firefox_profile import apply_firefox_profile
 
 
 class AffiliateMarketing:
@@ -58,7 +59,7 @@ class AffiliateMarketing:
             )
 
         # Set the profile path
-        self.options.profile = fp_profile_path
+        apply_firefox_profile(self.options, fp_profile_path)
 
         # Set the service
         self.service: Service = Service(GeckoDriverManager().install())

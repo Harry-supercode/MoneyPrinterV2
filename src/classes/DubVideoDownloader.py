@@ -14,6 +14,7 @@ from selenium.webdriver.firefox.service import Service
 from webdriver_manager.firefox import GeckoDriverManager
 
 from config import get_firefox_binary_path
+from firefox_profile import apply_firefox_profile
 from .DubFfmpeg import resolve_ffmpeg, resolve_ffprobe
 from status import info, warning
 from .DubSourceCheckpoint import mark_source_processed
@@ -303,7 +304,7 @@ class DubVideoDownloader:
             if not os.path.isdir(profile_path):
                 raise ValueError(f"dub_pipeline.browser_profile does not exist: {profile_path}")
             self._clear_stale_firefox_lock(profile_path)
-            options.profile = profile_path
+            apply_firefox_profile(options, profile_path)
 
         service = Service(GeckoDriverManager().install())
         return webdriver.Firefox(service=service, options=options)
