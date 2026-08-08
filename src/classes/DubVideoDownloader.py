@@ -13,6 +13,7 @@ from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service
 from webdriver_manager.firefox import GeckoDriverManager
 
+from config import get_firefox_binary_path
 from .DubFfmpeg import resolve_ffmpeg, resolve_ffprobe
 from status import info, warning
 from .DubSourceCheckpoint import mark_source_processed

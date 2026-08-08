@@ -9,6 +9,7 @@ from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service
 from webdriver_manager.firefox import GeckoDriverManager
 
+from config import get_firefox_binary_path
 from status import info, warning
 from .DubSourceCheckpoint import is_source_processed
 
