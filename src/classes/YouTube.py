@@ -441,6 +441,8 @@ class YouTube:
             script (str): The script of the video.
         """
         sentence_length = get_script_sentence_length()
+        max_duration_seconds = get_youtube_shorts_max_duration_seconds()
+        max_words = self._max_script_words(max_duration_seconds)
         prompt = f"""
         Generate a script for a video in {sentence_length} sentences, depending on the subject of the video.
 
@@ -456,6 +458,7 @@ class YouTube:
         Obviously, the script should be related to the subject of the video.
         
         YOU MUST NOT EXCEED THE {sentence_length} SENTENCES LIMIT. MAKE SURE THE {sentence_length} SENTENCES ARE SHORT.
+        YOU MUST NOT EXCEED {max_words} WORDS TOTAL, SO THE VOICEOVER STAYS UNDER {max_duration_seconds} SECONDS.
         YOU MUST NOT INCLUDE ANY TYPE OF MARKDOWN OR FORMATTING IN THE SCRIPT, NEVER USE A TITLE.
         YOU MUST WRITE THE SCRIPT IN THE LANGUAGE SPECIFIED IN [LANGUAGE].
         ONLY RETURN THE RAW CONTENT OF THE SCRIPT. DO NOT INCLUDE "VOICEOVER", "NARRATOR" OR SIMILAR INDICATORS OF WHAT SHOULD BE SPOKEN AT THE BEGINNING OF EACH PARAGRAPH OR LINE. YOU MUST NOT MENTION THE PROMPT, OR ANYTHING ABOUT THE SCRIPT ITSELF. ALSO, NEVER TALK ABOUT THE AMOUNT OF PARAGRAPHS OR LINES. JUST WRITE THE SCRIPT
@@ -467,6 +470,7 @@ class YouTube:
 
         # Apply regex to remove *
         completion = re.sub(r"\*", "", completion)
+        completion = self._shorten_script_for_shorts(completion, max_words)
 
         if not completion:
             error("The generated script is empty.")
@@ -480,6 +484,27 @@ class YouTube:
         self.script = completion
 
         return completion
+
+    @staticmethod
+    def _max_script_words(max_duration_seconds: int) -> int:
+        # Edge TTS is configured at +10%; this keeps the final video safely below 60s.
+        return max(35, min(135, int(max_duration_seconds * 2.0)))
+
+    @staticmethod
+    def _shorten_script_for_shorts(script: str, max_words: int) -> str:
+        cleaned = " ".join(str(script or "").split())
+        words = cleaned.split()
+        if len(words) <= max_words:
+            return cleaned
+
+        shortened = " ".join(words[:max_words]).rstrip(" ,;:-")
+        if shortened and shortened[-1] not in ".?!":
+            shortened += "."
+        warning(
+            "Generated script exceeded YouTube Shorts word budget. "
+            f"Trimmed from {len(words)} to {max_words} words."
+        )
+        return shortened
 
     def _youtube_title_prompt(self, attempt: int) -> str:
         uniqueness_hint = ""

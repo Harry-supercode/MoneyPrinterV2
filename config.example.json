@@ -173,6 +173,7 @@
   "font": "bold_font.ttf",
   "imagemagick_path": "Path to magick.exe or on linux/macOS just /usr/bin/convert",
   "script_sentence_length": 4,
+  "youtube_shorts_max_duration_seconds": 55,
   "post_bridge": {
     "enabled": false,
     "api_key": "",

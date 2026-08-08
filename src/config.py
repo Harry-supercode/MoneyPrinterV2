@@ -937,6 +937,23 @@ def get_script_sentence_length() -> int:
         else:
             return 4
 
+def get_youtube_shorts_max_duration_seconds() -> int:
+    """
+    Gets the maximum generated YouTube Shorts duration in seconds.
+
+    Returns:
+        seconds (int): Maximum duration, clamped to a short-video friendly range.
+    """
+    with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
+        config_json = json.load(file)
+
+    try:
+        seconds = int(config_json.get("youtube_shorts_max_duration_seconds", 55))
+    except Exception:
+        seconds = 55
+
+    return min(max(seconds, 15), 60)
+
 def get_post_bridge_config() -> dict:
     """
     Gets the Post Bridge configuration with safe defaults.
