@@ -119,6 +119,7 @@ class TikTok:
 
             if caption:
                 info(" => Setting TikTok caption...")
+                self._dismiss_overlays(driver)
 
                 caption_boxes = driver.find_elements(
                     By.XPATH,
@@ -126,7 +127,7 @@ class TikTok:
                 )
 
                 if caption_boxes:
-                    caption_boxes[0].click()
+                    self._click_caption_box(driver, caption_boxes[0])
                     time.sleep(1)
 
                     caption_boxes[0].send_keys(Keys.COMMAND, "a")
@@ -174,6 +175,7 @@ class TikTok:
     def _click_post_button(self, driver: webdriver.Firefox, post_button) -> None:
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", post_button)
         time.sleep(1)
+        self._dismiss_overlays(driver)
         try:
             post_button.click()
             return
@@ -205,3 +207,44 @@ class TikTok:
             pass
 
         driver.execute_script("arguments[0].click();", post_button)
+
+    def _click_caption_box(self, driver: webdriver.Firefox, caption_box) -> None:
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", caption_box)
+        time.sleep(1)
+        self._dismiss_overlays(driver)
+        try:
+            caption_box.click()
+        except ElementClickInterceptedException:
+            warning("TikTok caption box was covered by an overlay. Closing overlay and retrying.")
+            self._dismiss_overlays(driver)
+            driver.execute_script("arguments[0].click();", caption_box)
+
+    def _dismiss_overlays(self, driver: webdriver.Firefox) -> None:
+        try:
+            driver.switch_to.active_element.send_keys(Keys.ESCAPE)
+            time.sleep(0.5)
+        except Exception:
+            pass
+
+        try:
+            driver.execute_script(
+                """
+                for (const selector of [
+                    '.react-joyride__overlay',
+                    '.react-joyride__tooltip',
+                    '[class*="joyride"]',
+                    '[id^="mention-option"]',
+                    '[class*="suggestion"]',
+                    '[class*="Suggestion"]'
+                ]) {
+                    document.querySelectorAll(selector).forEach((el) => {
+                        el.style.display = 'none';
+                        el.style.pointerEvents = 'none';
+                    });
+                }
+                document.body.style.overflow = 'auto';
+                """
+            )
+            time.sleep(0.5)
+        except Exception:
+            pass
