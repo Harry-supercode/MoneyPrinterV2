@@ -1283,7 +1283,13 @@ class YouTube:
         combined_image_path = os.path.join(ROOT_DIR, ".mp", str(uuid4()) + ".mp4")
         threads = get_threads()
         tts_clip = AudioFileClip(self.tts_path)
-        max_duration = tts_clip.duration
+        max_duration = min(tts_clip.duration, get_youtube_shorts_max_duration_seconds())
+        if tts_clip.duration > max_duration:
+            warning(
+                "Voiceover exceeds configured short-video limit. "
+                f"Trimming render from {tts_clip.duration:.1f}s to {max_duration:.1f}s."
+            )
+            tts_clip = tts_clip.subclip(0, max_duration)
         if len(self.images) == 0:
             fallback_image = os.path.join(ROOT_DIR, "assets", "fallback.png")
             print(f"⚠️ No generated images found. Using fallback image: {fallback_image}")
@@ -1391,7 +1397,7 @@ class YouTube:
             clip_index += 1
 
         final_clip = concatenate_videoclips(clips, method="compose")
-        final_clip = final_clip.set_duration(tts_clip.duration)
+        final_clip = final_clip.set_duration(max_duration)
         final_clip = final_clip.set_fps(30)
         random_song = choose_random_song()
 
@@ -1415,7 +1421,7 @@ class YouTube:
         if subtitles is not None:
             subtitles = subtitles.set_position(("center", 1450))
             final_clip = CompositeVideoClip([final_clip, subtitles]).set_duration(
-                tts_clip.duration
+                max_duration
             )
 
         final_clip.write_videofile(combined_image_path, threads=threads)
