@@ -1,13 +1,16 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 set -u
 
-ROOT="/Users/harrytrinhtvf/Documents/HarryTrinh-TVF/Kombu/MoneyPrinterV2"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${MPV2_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 PYTHON="$ROOT/venv/bin/python"
 LOG="$ROOT/dub_cron.log"
 LOCK_DIR="/tmp/moneyprinterv2-dub-pipeline.lock"
+ACCOUNT_ID="${MPV2_DUB_ACCOUNT_ID:-}"
+MODEL="${MPV2_OLLAMA_MODEL:-llama3.2:3b}"
 
-export HOME="/Users/harrytrinhtvf"
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/snap/bin"
+export DISPLAY="${DISPLAY:-:1}"
 export PYTHONUNBUFFERED="1"
 
 timestamp() {
@@ -35,7 +38,11 @@ if pgrep -f "[s]rc/dub_cron.py" >/dev/null 2>&1; then
 fi
 
 echo "[$(timestamp)] START dub_pipeline pid=$$" >> "$LOG"
-/usr/bin/caffeinate -dimsu "$PYTHON" src/dub_cron.py "" llama3.2:latest >> "$LOG" 2>&1
+if command -v caffeinate >/dev/null 2>&1; then
+  caffeinate -dimsu "$PYTHON" src/dub_cron.py "$ACCOUNT_ID" "$MODEL" >> "$LOG" 2>&1
+else
+  "$PYTHON" src/dub_cron.py "$ACCOUNT_ID" "$MODEL" >> "$LOG" 2>&1
+fi
 exit_code=$?
 echo "[$(timestamp)] END dub_pipeline exit=$exit_code" >> "$LOG"
 exit "$exit_code"

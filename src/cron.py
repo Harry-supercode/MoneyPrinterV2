@@ -31,6 +31,26 @@ def _env_flag(name: str, default: bool = True) -> bool:
     return default
 
 
+def _resolve_account(accounts: list[dict], account_id: str, account_type: str) -> dict:
+    if account_id:
+        for account in accounts:
+            if account.get("id") == account_id:
+                return account
+
+        error(f"{account_type} account not found: {account_id}")
+        available_ids = [str(account.get("id", "")) for account in accounts if account.get("id")]
+        if available_ids:
+            warning(f"Available {account_type} account IDs: {', '.join(available_ids)}")
+        sys.exit(1)
+
+    if accounts:
+        warning(f"No {account_type} account UUID provided. Using first cached account.")
+        return accounts[0]
+
+    error(f"No cached {account_type} accounts found.")
+    sys.exit(1)
+
+
 def main():
     """Main function to post content to Twitter or upload videos to YouTube.
 
@@ -75,138 +95,126 @@ def main():
 
     if purpose == "twitter":
         accounts = get_accounts("twitter")
-
-        if not account_id:
-            error("Account UUID cannot be empty.")
-
-        for acc in accounts:
-            if acc["id"] == account_id:
-                if verbose:
-                    info("Initializing Twitter...")
-                twitter = Twitter(
-                    acc["id"],
-                    acc["nickname"],
-                    acc["firefox_profile"],
-                    acc["topic"]
-                )
-                twitter.post()
-                if verbose:
-                    success("Done posting.")
-                break
+        acc = _resolve_account(accounts, account_id, "twitter")
+        if verbose:
+            info("Initializing Twitter...")
+        twitter = Twitter(
+            acc["id"],
+            acc["nickname"],
+            acc["firefox_profile"],
+            acc["topic"]
+        )
+        twitter.post()
+        if verbose:
+            success("Done posting.")
     elif purpose == "youtube":
         tts = TTS()
 
         accounts = get_accounts("youtube")
+        acc = _resolve_account(accounts, account_id, "youtube")
+        if verbose:
+            info("Initializing YouTube...")
+        youtube = YouTube(
+            acc["id"],
+            acc["nickname"],
+            acc["firefox_profile"],
+            acc["niche"],
+            acc["language"]
+        )
+        youtube.generate_video(tts)
+        upload_success = youtube.upload_video()
+        if upload_success:
+            youtube_success = True
+            tiktok_success = False
+            facebook_success = False
+            cleanup_mp_folder(max_age_hours=6)
+            if verbose:
+                success("Uploaded Short.")
 
-        if not account_id:
-            error("Account UUID cannot be empty.")
+            tiktok_caption = build_caption(
+                youtube.metadata.get("title", ""),
+                youtube.metadata.get("description", ""),
+            )
 
-        for acc in accounts:
-            if acc["id"] == account_id:
-                if verbose:
-                    info("Initializing YouTube...")
-                youtube = YouTube(
-                    acc["id"],
-                    acc["nickname"],
-                    acc["firefox_profile"],
-                    acc["niche"],
-                    acc["language"]
-                )
-                youtube.generate_video(tts)
-                upload_success = youtube.upload_video()
-                if upload_success:
-                    youtube_success = True
-                    tiktok_success = False
-                    facebook_success = False
-                    cleanup_mp_folder(max_age_hours=6)
+            if _env_flag("MPV2_UPLOAD_TIKTOK", True):
+                try:
                     if verbose:
-                        success("Uploaded Short.")
+                        info("Initializing TikTok...")
 
-                    tiktok_caption = build_caption(
-                        youtube.metadata.get("title", ""),
-                        youtube.metadata.get("description", ""),
-                    )
-
-                    if _env_flag("MPV2_UPLOAD_TIKTOK", True):
-                        try:
-                            if verbose:
-                                info("Initializing TikTok...")
-
-                            tiktok = TikTok(acc["firefox_profile"])
-                            if is_published(youtube.video_path, "tiktok"):
-                                warning("TikTok already published. Skipping.")
-                                tiktok_success = True
-                            else:
-                                tiktok_success = tiktok.upload_video(
-                                    youtube.video_path,
-                                    tiktok_caption,
-                                )
-
-                                if tiktok_success:
-                                    mark_published(youtube.video_path, "tiktok")
-
-                            if tiktok_success:
-                                if verbose:
-                                    success("Uploaded TikTok.")
-                            else:
-                                warning("TikTok upload failed.")
-
-                        except Exception as e:
-                            warning(f"TikTok upload failed: {e}")
+                    tiktok = TikTok(acc["firefox_profile"])
+                    if is_published(youtube.video_path, "tiktok"):
+                        warning("TikTok already published. Skipping.")
+                        tiktok_success = True
                     else:
-                        info("Skipping TikTok upload for this scheduler slot.")
+                        tiktok_success = tiktok.upload_video(
+                            youtube.video_path,
+                            tiktok_caption,
+                        )
 
-                    if _env_flag("MPV2_UPLOAD_FACEBOOK_REELS", True):
-                        try:
-                            if verbose:
-                                info("Initializing Facebook Profile Reels...")
+                        if tiktok_success:
+                            mark_published(youtube.video_path, "tiktok")
 
-                            facebook_reels = FacebookReels(acc["firefox_profile"])
-                            if is_published(youtube.video_path, "facebook_profile"):
-                                warning("Facebook Profile Reel already published. Skipping.")
-                                facebook_success = True
-                            else:
-                                facebook_success = facebook_reels.upload_profile_reel(
-                                    youtube.video_path,
-                                    tiktok_caption,
-                                )
-
-                                if facebook_success:
-                                    mark_published(youtube.video_path, "facebook_profile")
-
-                            if facebook_success:
-                                if verbose:
-                                    success("Uploaded Facebook Profile Reel.")
-                            else:
-                                warning("Facebook Profile Reel upload failed.")
-
-                        except Exception as e:
-                            warning(f"Facebook Profile Reel upload failed: {e}")
+                    if tiktok_success:
+                        if verbose:
+                            success("Uploaded TikTok.")
                     else:
-                        info("Skipping Facebook Profile Reel upload for this scheduler slot.")
+                        warning("TikTok upload failed.")
 
-                    write_health_check(
-                        video_path=youtube.video_path,
-                        youtube=youtube_success,
-                        tiktok=tiktok_success,
-                        facebook_profile=facebook_success,
-                    )
+                except Exception as e:
+                    warning(f"TikTok upload failed: {e}")
+            else:
+                info("Skipping TikTok upload for this scheduler slot.")
 
-                    maybe_crosspost_youtube_short(
-                        video_path=youtube.video_path,
-                        title=youtube.metadata.get("title", ""),
-                        interactive=False,
-                    )
+            if _env_flag("MPV2_UPLOAD_FACEBOOK_REELS", True):
+                try:
+                    if verbose:
+                        info("Initializing Facebook Profile Reels...")
 
-                else:
-                    write_health_check(
-                        video_path=getattr(youtube, "video_path", ""),
-                        youtube=False,
-                        tiktok=False,
-                        facebook_profile=False,
-                    )
-                    warning("YouTube upload failed. Skipping Post Bridge cross-post.")
-                break
+                    facebook_reels = FacebookReels(acc["firefox_profile"])
+                    if is_published(youtube.video_path, "facebook_profile"):
+                        warning("Facebook Profile Reel already published. Skipping.")
+                        facebook_success = True
+                    else:
+                        facebook_success = facebook_reels.upload_profile_reel(
+                            youtube.video_path,
+                            tiktok_caption,
+                        )
+
+                        if facebook_success:
+                            mark_published(youtube.video_path, "facebook_profile")
+
+                    if facebook_success:
+                        if verbose:
+                            success("Uploaded Facebook Profile Reel.")
+                    else:
+                        warning("Facebook Profile Reel upload failed.")
+
+                except Exception as e:
+                    warning(f"Facebook Profile Reel upload failed: {e}")
+            else:
+                info("Skipping Facebook Profile Reel upload for this scheduler slot.")
+
+            write_health_check(
+                video_path=youtube.video_path,
+                youtube=youtube_success,
+                tiktok=tiktok_success,
+                facebook_profile=facebook_success,
+            )
+
+            maybe_crosspost_youtube_short(
+                video_path=youtube.video_path,
+                title=youtube.metadata.get("title", ""),
+                interactive=False,
+            )
+
+        else:
+            write_health_check(
+                video_path=getattr(youtube, "video_path", ""),
+                youtube=False,
+                tiktok=False,
+                facebook_profile=False,
+            )
+            warning("YouTube upload failed. Skipping Post Bridge cross-post.")
     else:
         error("Invalid Purpose, exiting...")
         sys.exit(1)

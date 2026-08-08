@@ -204,8 +204,8 @@
       "tiktok": 2
     },
     "launchers": {
-      "youtube_short": "/Users/harrytrinhtvf/Library/Application Support/MoneyPrinterV2/run_youtube_short_job.sh",
-      "dub_pipeline": "/Users/harrytrinhtvf/Library/Application Support/MoneyPrinterV2/run_dub_pipeline_job.sh"
+      "youtube_short": "scripts/run_youtube_short_job.sh",
+      "dub_pipeline": "scripts/run_dub_pipeline_job.sh"
     },
     "launch_probe_seconds": 8
   }

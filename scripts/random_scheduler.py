@@ -35,8 +35,8 @@ DEFAULT_CONFIG = {
         "tiktok": 2,
     },
     "launchers": {
-        "youtube_short": "/Users/harrytrinhtvf/Library/Application Support/MoneyPrinterV2/run_youtube_short_job.sh",
-        "dub_pipeline": "/Users/harrytrinhtvf/Library/Application Support/MoneyPrinterV2/run_dub_pipeline_job.sh",
+        "youtube_short": str(ROOT / "scripts" / "run_youtube_short_job.sh"),
+        "dub_pipeline": str(ROOT / "scripts" / "run_dub_pipeline_job.sh"),
     },
     "launch_probe_seconds": 8,
 }
@@ -336,6 +336,8 @@ def launch_slot(slot: dict, config: dict) -> bool:
         return False
 
     launcher_path = Path(launcher).expanduser()
+    if not launcher_path.is_absolute():
+        launcher_path = ROOT / launcher_path
     if not launcher_path.exists():
         slot["status"] = "failed"
         slot["error"] = f"Launcher does not exist: {launcher}"
@@ -354,7 +356,7 @@ def launch_slot(slot: dict, config: dict) -> bool:
         )
         launcher_log.flush()
         process = subprocess.Popen(
-            ["/bin/zsh", str(launcher_path)],
+            [str(launcher_path)],
             cwd=str(ROOT),
             env=env,
             stdout=launcher_log,

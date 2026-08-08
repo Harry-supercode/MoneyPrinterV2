@@ -1,13 +1,14 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 set -u
 
-ROOT="/Users/harrytrinhtvf/Documents/HarryTrinh-TVF/Kombu/MoneyPrinterV2"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${MPV2_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 PYTHON="$ROOT/venv/bin/python"
 LOG="$ROOT/random_scheduler.log"
 LOCK_DIR="/tmp/moneyprinterv2-random-scheduler.lock"
 
-export HOME="/Users/harrytrinhtvf"
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/snap/bin"
+export DISPLAY="${DISPLAY:-:1}"
 export PYTHONUNBUFFERED="1"
 
 timestamp() {
