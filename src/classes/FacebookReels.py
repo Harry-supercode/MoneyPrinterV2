@@ -62,6 +62,20 @@ FACEBOOK_NEGATIVE_INPUT_MARKERS = [
     "bình luận",
 ]
 
+FACEBOOK_NEXT_MARKERS = [
+    "next",
+    "tiếp",
+    "tiếp tục",
+]
+
+FACEBOOK_PUBLISH_MARKERS = [
+    "share",
+    "publish",
+    "post",
+    "chia sẻ",
+    "đăng",
+]
+
 
 class FacebookReels:
     def __init__(self, fp_profile_path: str):
@@ -471,6 +485,117 @@ class FacebookReels:
         except Exception as exc:
             warning(f"Could not inspect Facebook caption candidates: {exc}")
 
+    def _find_action_button(
+        self,
+        driver: webdriver.Firefox,
+        markers: list[str],
+        timeout: int = 60,
+    ) -> WebElement:
+        def find_button(current_driver: webdriver.Firefox):
+            button = current_driver.execute_script(
+                """
+                const markers = arguments[0].map((value) => String(value).toLowerCase());
+
+                function textFor(el) {
+                    return [
+                        el.innerText || '',
+                        el.textContent || '',
+                        el.getAttribute('aria-label') || '',
+                        el.getAttribute('title') || ''
+                    ].join(' ').toLowerCase();
+                }
+
+                function isVisible(el) {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return (
+                        rect.width > 20 &&
+                        rect.height > 12 &&
+                        style.display !== 'none' &&
+                        style.visibility !== 'hidden' &&
+                        Number(style.opacity || 1) > 0
+                    );
+                }
+
+                function isEnabled(el) {
+                    return (
+                        !el.disabled &&
+                        el.getAttribute('aria-disabled') !== 'true' &&
+                        !String(el.className || '').toLowerCase().includes('disabled')
+                    );
+                }
+
+                const candidates = Array.from(document.querySelectorAll(
+                    "div[role='button'], button, a[role='button']"
+                ));
+                const matches = candidates
+                    .filter((el) => isVisible(el) && isEnabled(el))
+                    .filter((el) => markers.some((marker) => textFor(el).includes(marker)));
+
+                return matches.length ? matches[matches.length - 1] : null;
+                """,
+                markers,
+            )
+            return button or False
+
+        return WebDriverWait(driver, timeout).until(find_button)
+
+    def _click_action_button(
+        self,
+        driver: webdriver.Firefox,
+        markers: list[str],
+        label: str,
+        timeout: int = 60,
+    ) -> None:
+        try:
+            button = self._find_action_button(driver, markers, timeout=timeout)
+        except Exception:
+            self._log_button_candidates(driver)
+            raise Exception(f"Could not find {label} button")
+
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+        time.sleep(1)
+        driver.execute_script("arguments[0].click();", button)
+
+    def _try_click_action_button(
+        self,
+        driver: webdriver.Firefox,
+        markers: list[str],
+        label: str,
+        timeout: int = 20,
+    ) -> bool:
+        try:
+            self._click_action_button(driver, markers, label, timeout=timeout)
+            return True
+        except Exception as exc:
+            warning(f"Could not click optional Facebook {label} button: {exc}")
+            return False
+
+    def _log_button_candidates(self, driver: webdriver.Firefox) -> None:
+        try:
+            candidates = driver.execute_script(
+                """
+                return Array.from(document.querySelectorAll("div[role='button'], button, a[role='button']"))
+                    .filter((el) => {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 20 && rect.height > 12 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden';
+                    })
+                    .slice(-20)
+                    .map((el) => ({
+                        tag: el.tagName,
+                        text: (el.innerText || el.textContent || '').slice(0, 100),
+                        aria: el.getAttribute('aria-label') || '',
+                        disabled: el.disabled || el.getAttribute('aria-disabled') || '',
+                    }));
+                """
+            )
+            warning(f"Facebook button candidates: {candidates}")
+        except Exception as exc:
+            warning(f"Could not inspect Facebook button candidates: {exc}")
+
     def _find_file_input(self, driver: webdriver.Firefox) -> WebElement:
         def find_input(current_driver: webdriver.Firefox):
             inputs = current_driver.find_elements(By.XPATH, "//input[@type='file']")
@@ -518,20 +643,10 @@ class FacebookReels:
             info(" => Uploading Facebook Reel video...")
             file_input = self._find_file_input(driver)
             file_input.send_keys(os.path.abspath(video_path))
-            time.sleep(20)
+            time.sleep(30)
 
             info(" => Clicking Next button...")
-            next_buttons = driver.find_elements(
-                By.XPATH,
-                "//div[@role='button' and (.//span[contains(text(), 'Tiếp')] or .//span[contains(text(), 'Next')])]"
-            )
-
-            if not next_buttons:
-                raise Exception("Could not find Next button")
-
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_buttons[-1])
-            time.sleep(1)
-            driver.execute_script("arguments[0].click();", next_buttons[-1])
+            self._click_action_button(driver, FACEBOOK_NEXT_MARKERS, "Next", timeout=90)
             time.sleep(10)
 
             caption_set = False
@@ -539,46 +654,14 @@ class FacebookReels:
                 caption_set = self._try_set_caption(driver, caption, "after first Next")
 
             info(" => Clicking Next button again if available...")
-
-            next_buttons = driver.find_elements(
-                By.XPATH,
-                "//div[@role='button' and (.//span[contains(text(), 'Tiếp')] or .//span[contains(text(), 'Next')])]"
-            )
-
-            if next_buttons:
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_buttons[-1])
-                time.sleep(1)
-                driver.execute_script("arguments[0].click();", next_buttons[-1])
+            if self._try_click_action_button(driver, FACEBOOK_NEXT_MARKERS, "Next", timeout=20):
                 time.sleep(10)
 
             if caption and not caption_set:
                 self._try_set_caption(driver, caption, "after final Next")
 
             info(" => Looking for Share/Publish button...")
-            publish_buttons = driver.find_elements(
-                By.XPATH,
-                "//div[@role='button' and ("
-                ".//span[contains(text(), 'Chia sẻ')] or "
-                ".//span[contains(text(), 'Đăng')] or "
-                ".//span[contains(text(), 'Share')] or "
-                ".//span[contains(text(), 'Publish')]"
-                ")]"
-            )
-
-            if not publish_buttons:
-                all_buttons = driver.find_elements(By.XPATH, "//div[@role='button']")
-                # print("===== FACEBOOK BUTTONS =====")
-                # for i, btn in enumerate(all_buttons):
-                #     try:
-                #         print(i, repr(btn.text), repr(btn.get_attribute("aria-label")))
-                #     except Exception:
-                #         pass
-                # print("============================")
-                raise Exception("Could not find Share/Publish button")
-
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", publish_buttons[-1])
-            time.sleep(1)
-            driver.execute_script("arguments[0].click();", publish_buttons[-1])
+            self._click_action_button(driver, FACEBOOK_PUBLISH_MARKERS, "Share/Publish", timeout=60)
             time.sleep(20)
 
             success(" => Uploaded Facebook Profile Reel.")
