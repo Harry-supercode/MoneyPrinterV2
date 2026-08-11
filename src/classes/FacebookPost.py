@@ -384,7 +384,12 @@ class FacebookPost:
 
     def _try_click_next_button(self, driver: webdriver.Firefox, timeout: int = 20) -> bool:
         try:
-            button = self._find_dialog_button(driver, FACEBOOK_NEXT_BUTTON_MARKERS, timeout)
+            button = self._find_dialog_button(
+                driver,
+                FACEBOOK_NEXT_BUTTON_MARKERS,
+                timeout,
+                allow_primary_fallback=True,
+            )
         except Exception:
             return False
 
@@ -395,19 +400,31 @@ class FacebookPost:
         return True
 
     def _find_publish_button(self, driver: webdriver.Firefox, timeout: int) -> WebElement:
-        return self._find_dialog_button(driver, FACEBOOK_POST_BUTTON_MARKERS, timeout)
+        return self._find_dialog_button(
+            driver,
+            FACEBOOK_POST_BUTTON_MARKERS,
+            timeout,
+            allow_primary_fallback=True,
+        )
 
     def _find_dialog_button(
         self,
         driver: webdriver.Firefox,
         markers: list[str],
         timeout: int,
+        allow_primary_fallback: bool = False,
     ) -> WebElement:
         def find(current_driver: webdriver.Firefox):
             button = current_driver.execute_script(
                 """
                 const markers = arguments[0].map((value) => String(value).toLowerCase());
+                const allowFallback = Boolean(arguments[1]);
                 const exactMarkers = new Set(markers);
+                const negativeMarkers = [
+                    'close', 'đóng', 'back', 'quay lại', 'cancel', 'hủy',
+                    'photo', 'ảnh', 'video', 'tag', 'gắn thẻ', 'feeling',
+                    'check in', 'more', 'xem thêm'
+                ];
 
                 function textFor(el) {
                     return [
@@ -444,19 +461,25 @@ class FacebookPost:
                     .map((el) => {
                         const text = textFor(el);
                         const rect = el.getBoundingClientRect();
+                        const negative = negativeMarkers.some((marker) => text.includes(marker));
                         let score = 0;
                         if (exactMarkers.has(text)) score += 1000;
                         if (markers.some((marker) => text.includes(marker))) score += 300;
                         if (text === 'post' || text === 'đăng') score += 500;
-                        score += Math.round(rect.top / 10);
-                        score += Math.round(rect.left / 20);
-                        return {el, text, score};
+                        if (allowFallback && !negative) {
+                            score += 120;
+                            score += Math.round(rect.top / 8);
+                            score += Math.round(rect.left / 12);
+                        }
+                        if (negative) score -= 1000;
+                        return {el, text, score, rect: {top: rect.top, left: rect.left, width: rect.width, height: rect.height}};
                     })
-                    .filter((item) => item.score >= 300)
+                    .filter((item) => item.score >= (allowFallback ? 120 : 300))
                     .sort((a, b) => b.score - a.score);
                 return candidates.length ? candidates[0].el : null;
                 """,
                 markers,
+                allow_primary_fallback,
             )
             return button or False
 
