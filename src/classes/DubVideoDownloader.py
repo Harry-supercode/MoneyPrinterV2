@@ -79,69 +79,25 @@ class DubVideoDownloader:
             )
 
         for candidate in ordered_candidates:
-            candidate_url = candidate.get("url", "")
-            if not candidate_url:
-                continue
-            if "/404" in candidate_url:
-                warning(f"Skipping invalid Rednote 404 candidate URL: {candidate_url}")
-                continue
-
-            info(f" => Downloading source candidate with yt-dlp: {candidate_url}")
-            command = [
-                *ytdlp_command,
-                "--no-playlist",
-                "--merge-output-format",
-                "mp4",
-                "-f",
-                "bv*+ba/b",
-                "--user-agent",
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0",
-                "--referer",
-                "https://www.rednote.com/",
-                "-o",
+            downloaded_path = self._try_download_candidate_with_ytdlp(
+                candidate,
                 target_path,
-                candidate_url,
-            ]
-            browser_profile = str(self.config.get("browser_profile", "")).strip()
-            if browser_profile:
-                insert_at = len(ytdlp_command)
-                command[insert_at:insert_at] = [
-                    "--cookies-from-browser",
-                    f"firefox:{browser_profile}",
-                ]
-
-            result = subprocess.run(command, capture_output=True, text=True)
-            attempt = {
-                "candidate": candidate,
-                "returncode": result.returncode,
-                "stdout_tail": result.stdout[-2000:],
-                "stderr_tail": result.stderr[-2000:],
-            }
-            attempts.append(attempt)
-
-            if result.returncode == 0 and os.path.exists(target_path):
-                if not self._is_valid_video(target_path):
-                    warning("yt-dlp output is not a valid video. Trying next method.")
-                    self._remove_file(target_path)
-                    attempt["invalid_video"] = True
-                else:
-                    candidate["selected"] = True
-                    mark_source_processed(candidate_url, target_path)
-                    metadata = {
-                        "source": candidate.get("source", ""),
-                        "source_url": candidate_url,
-                        "source_title": candidate.get("title", ""),
-                        "download_method": "yt-dlp",
-                        "download_attempts": attempts,
-                    }
-                    self._write_outputs(run_dir, candidates, metadata)
-                    return target_path
-
-            if result.returncode == 0 and os.path.exists(target_path):
-                self._remove_file(target_path)
-
-            if result.returncode != 0:
-                warning(f"yt-dlp failed for candidate: {candidate_url}")
+                ytdlp_command,
+                attempts,
+            )
+            candidate_url = candidate.get("url", "")
+            if downloaded_path:
+                candidate["selected"] = True
+                mark_source_processed(candidate_url, target_path)
+                metadata = {
+                    "source": candidate.get("source", ""),
+                    "source_url": candidate_url,
+                    "source_title": candidate.get("title", ""),
+                    "download_method": "yt-dlp",
+                    "download_attempts": attempts,
+                }
+                self._write_outputs(run_dir, candidates, metadata)
+                return downloaded_path
 
             browser_attempt = self._download_with_browser_capture(
                 candidate,
@@ -162,9 +118,37 @@ class DubVideoDownloader:
                 self._write_outputs(run_dir, candidates, metadata)
                 return target_path
 
+        fallback_candidates = self._fallback_source_candidates(ordered_candidates)
+        if fallback_candidates:
+            warning(
+                "All discovered source candidates failed. Trying configured "
+                "dub_pipeline.fallback_source_urls."
+            )
+        for candidate in fallback_candidates:
+            downloaded_path = self._try_download_candidate_with_ytdlp(
+                candidate,
+                target_path,
+                ytdlp_command,
+                attempts,
+            )
+            candidate_url = candidate.get("url", "")
+            if downloaded_path:
+                candidate["selected"] = True
+                mark_source_processed(candidate_url, target_path)
+                all_candidates = ordered_candidates + fallback_candidates
+                metadata = {
+                    "source": candidate.get("source", ""),
+                    "source_url": candidate_url,
+                    "source_title": candidate.get("title", ""),
+                    "download_method": "fallback_source_url",
+                    "download_attempts": attempts,
+                }
+                self._write_outputs(run_dir, all_candidates, metadata)
+                return downloaded_path
+
         self._write_outputs(
             run_dir,
-            candidates,
+            ordered_candidates + fallback_candidates,
             {
                 "source": "discovered",
                 "download_method": "yt-dlp",
@@ -172,6 +156,102 @@ class DubVideoDownloader:
             },
         )
         raise RuntimeError("All discovered source download candidates failed")
+
+    def _try_download_candidate_with_ytdlp(
+        self,
+        candidate: dict,
+        target_path: str,
+        ytdlp_command: list[str],
+        attempts: list[dict],
+    ) -> str:
+        candidate_url = candidate.get("url", "")
+        if not candidate_url:
+            return ""
+        if "/404" in candidate_url:
+            warning(f"Skipping invalid Rednote 404 candidate URL: {candidate_url}")
+            return ""
+
+        info(f" => Downloading source candidate with yt-dlp: {candidate_url}")
+        command = [
+            *ytdlp_command,
+            "--no-playlist",
+            "--merge-output-format",
+            "mp4",
+            "-f",
+            "bv*+ba/b",
+            "--user-agent",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0",
+            "--referer",
+            self._referer_for_url(candidate_url),
+            "-o",
+            target_path,
+            candidate_url,
+        ]
+        browser_profile = str(self.config.get("browser_profile", "")).strip()
+        if browser_profile:
+            insert_at = len(ytdlp_command)
+            command[insert_at:insert_at] = [
+                "--cookies-from-browser",
+                f"firefox:{browser_profile}",
+            ]
+
+        result = subprocess.run(command, capture_output=True, text=True)
+        attempt = {
+            "candidate": candidate,
+            "returncode": result.returncode,
+            "stdout_tail": result.stdout[-2000:],
+            "stderr_tail": result.stderr[-2000:],
+        }
+        attempts.append(attempt)
+
+        if result.returncode == 0 and os.path.exists(target_path):
+            if not self._is_valid_video(target_path):
+                warning("yt-dlp output is not a valid video. Trying next method.")
+                self._remove_file(target_path)
+                attempt["invalid_video"] = True
+                return ""
+            return target_path
+
+        if result.returncode == 0 and os.path.exists(target_path):
+            self._remove_file(target_path)
+
+        if result.returncode != 0:
+            warning(f"yt-dlp failed for candidate: {candidate_url}")
+        return ""
+
+    def _fallback_source_candidates(self, existing_candidates: list[dict]) -> list[dict]:
+        existing_urls = {
+            str(candidate.get("url", "")).strip()
+            for candidate in existing_candidates
+            if str(candidate.get("url", "")).strip()
+        }
+        fallback_urls = self.config.get("fallback_source_urls", [])
+        if not isinstance(fallback_urls, list):
+            return []
+
+        candidates = []
+        for index, raw_url in enumerate(fallback_urls, start=1):
+            url = str(raw_url).strip()
+            if not url or url in existing_urls:
+                continue
+            candidates.append(
+                {
+                    "source": "fallback_source_url",
+                    "title": f"Configured fallback source {index}",
+                    "url": url,
+                    "engagement_score": 0,
+                }
+            )
+        return candidates
+
+    @staticmethod
+    def _referer_for_url(url: str) -> str:
+        hostname = urlparse(url).hostname or ""
+        if "rednote.com" in hostname or "xiaohongshu.com" in hostname:
+            return "https://www.rednote.com/"
+        if "douyin.com" in hostname:
+            return "https://www.douyin.com/"
+        return f"{urlparse(url).scheme or 'https'}://{hostname}/" if hostname else "https://www.google.com/"
 
     def _ytdlp_command(self) -> list[str]:
         try:

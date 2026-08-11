@@ -335,16 +335,16 @@ def get_pexels_api_key() -> str:
 def get_luma_api_key() -> str:
     with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
         configured = json.load(file).get("luma_api_key", "")
-        return configured or os.environ.get("LUMA_API_KEY", "")
+        return str(configured or os.environ.get("LUMA_API_KEY", "")).strip()
 
 def get_runway_api_key() -> str:
     with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
         configured = json.load(file).get("runway_api_key", "")
-        return (
+        return str(
             configured
             or os.environ.get("RUNWAYML_API_SECRET", "")
             or os.environ.get("RUNWAY_API_KEY", "")
-        )
+        ).strip()
 
 def get_ai_video_config() -> dict:
     """
@@ -389,12 +389,22 @@ def get_ai_video_config() -> dict:
     except (TypeError, ValueError):
         timeout_seconds = defaults["timeout_seconds"]
 
+    provider = str(raw_config.get("provider", defaults["provider"])).strip()
+    model = str(raw_config.get("model", defaults["model"])).strip()
+    duration = str(raw_config.get("duration", defaults["duration"])).strip()
+
+    if provider == "luma":
+        if not model or model == defaults["model"]:
+            model = "ray-2"
+        if duration in {"5", "9"}:
+            duration = f"{duration}s"
+
     return {
         "enabled": bool(raw_config.get("enabled", defaults["enabled"])),
-        "provider": str(raw_config.get("provider", defaults["provider"])).strip(),
+        "provider": provider,
         "mode": str(raw_config.get("mode", defaults["mode"])).strip(),
-        "model": str(raw_config.get("model", defaults["model"])).strip(),
-        "duration": str(raw_config.get("duration", defaults["duration"])).strip(),
+        "model": model,
+        "duration": duration,
         "resolution": str(raw_config.get("resolution", defaults["resolution"])).strip(),
         "aspect_ratio": str(raw_config.get("aspect_ratio", defaults["aspect_ratio"])).strip(),
         "ratio": str(raw_config.get("ratio", defaults["ratio"])).strip(),
@@ -412,6 +422,7 @@ def get_dub_pipeline_config() -> dict:
     defaults = {
         "enabled": False,
         "sources": ["xiaohongshu"],
+        "fallback_source_urls": [],
         "discovery_mode": "explore",
         "max_candidates": 12,
         "discovery_wait_seconds": 12,
@@ -494,6 +505,12 @@ def get_dub_pipeline_config() -> dict:
     sources = raw_config.get("sources", defaults["sources"])
     if not isinstance(sources, list):
         sources = defaults["sources"]
+    fallback_source_urls = raw_config.get(
+        "fallback_source_urls",
+        defaults["fallback_source_urls"],
+    )
+    if not isinstance(fallback_source_urls, list):
+        fallback_source_urls = defaults["fallback_source_urls"]
 
     topics = raw_config.get("topics", defaults["topics"])
     if not isinstance(topics, list):
@@ -598,6 +615,9 @@ def get_dub_pipeline_config() -> dict:
     config = {
         "enabled": bool(raw_config.get("enabled", defaults["enabled"])),
         "sources": [str(source).strip() for source in sources if str(source).strip()],
+        "fallback_source_urls": [
+            str(url).strip() for url in fallback_source_urls if str(url).strip()
+        ],
         "discovery_mode": str(raw_config.get("discovery_mode", defaults["discovery_mode"])).strip(),
         "max_candidates": max(1, min(max_candidates, 50)),
         "discovery_wait_seconds": max(3, min(discovery_wait_seconds, 60)),
@@ -719,6 +739,122 @@ def get_dub_pipeline_config() -> dict:
             config["fallback_transcript_text"] = "Watch this video until the end."
 
     return config
+
+def get_social_posts_config() -> dict:
+    """
+    Gets browser-automation social post configuration with safe defaults.
+
+    Returns:
+        config (dict): Sanitized social post pipeline configuration
+    """
+    defaults = {
+        "enabled": False,
+        "automation_verified": False,
+        "browser_profile": "",
+        "output_root": "output/social_posts",
+        "language": "vi",
+        "brand_name": "HIEMEE",
+        "tone": "concise, useful, founder-led",
+        "max_chars": 900,
+        "topics": [],
+        "image_paths": [],
+        "platforms": {
+            "facebook": {
+                "enabled": True,
+                "create_url": "https://www.facebook.com/",
+                "post_wait_seconds": 12,
+            },
+            "youtube": {
+                "enabled": False,
+                "create_url": "https://www.youtube.com/",
+                "post_wait_seconds": 12,
+            },
+        },
+    }
+
+    with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
+        config_json = json.load(file)
+
+    raw_config = config_json.get("social_posts", {})
+    if not isinstance(raw_config, dict):
+        raw_config = {}
+
+    raw_platforms = raw_config.get("platforms", {})
+    if not isinstance(raw_platforms, dict):
+        raw_platforms = {}
+
+    def platform_config(name: str) -> dict:
+        raw_platform = raw_platforms.get(name, {})
+        if not isinstance(raw_platform, dict):
+            raw_platform = {}
+
+        platform_defaults = defaults["platforms"][name]
+        try:
+            post_wait_seconds = int(
+                raw_platform.get(
+                    "post_wait_seconds",
+                    platform_defaults["post_wait_seconds"],
+                )
+            )
+        except (TypeError, ValueError):
+            post_wait_seconds = platform_defaults["post_wait_seconds"]
+
+        return {
+            "enabled": bool(raw_platform.get("enabled", platform_defaults["enabled"])),
+            "create_url": str(
+                raw_platform.get("create_url", platform_defaults["create_url"])
+            ).strip()
+            or platform_defaults["create_url"],
+            "post_wait_seconds": max(3, min(post_wait_seconds, 120)),
+        }
+
+    try:
+        max_chars = int(raw_config.get("max_chars", defaults["max_chars"]))
+    except (TypeError, ValueError):
+        max_chars = defaults["max_chars"]
+
+    topics = raw_config.get("topics", defaults["topics"])
+    if not isinstance(topics, list):
+        topics = defaults["topics"]
+
+    image_paths = raw_config.get("image_paths", defaults["image_paths"])
+    if not isinstance(image_paths, list):
+        image_paths = defaults["image_paths"]
+
+    return {
+        "enabled": bool(raw_config.get("enabled", defaults["enabled"])),
+        "automation_verified": bool(
+            raw_config.get(
+                "automation_verified",
+                defaults["automation_verified"],
+            )
+        ),
+        "browser_profile": str(
+            str(raw_config.get("browser_profile", defaults["browser_profile"])).strip()
+            or os.environ.get("MPV2_SOCIAL_POST_FIREFOX_PROFILE", "")
+        ).strip(),
+        "output_root": str(
+            raw_config.get("output_root", defaults["output_root"])
+        ).strip()
+        or defaults["output_root"],
+        "language": str(raw_config.get("language", defaults["language"])).strip()
+        or defaults["language"],
+        "brand_name": str(raw_config.get("brand_name", defaults["brand_name"])).strip()
+        or defaults["brand_name"],
+        "tone": str(raw_config.get("tone", defaults["tone"])).strip()
+        or defaults["tone"],
+        "max_chars": max(100, min(max_chars, 2000)),
+        "topics": [str(topic).strip() for topic in topics if str(topic).strip()],
+        "image_paths": [
+            str(image_path).strip()
+            for image_path in image_paths
+            if str(image_path).strip()
+        ],
+        "platforms": {
+            "facebook": platform_config("facebook"),
+            "youtube": platform_config("youtube"),
+        },
+    }
 
 def get_nanobanana2_model() -> str:
     """

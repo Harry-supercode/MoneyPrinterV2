@@ -29,6 +29,7 @@ DEFAULT_CONFIG = {
     "jobs": [
         {"name": "youtube_short", "count": 3},
         {"name": "dub_pipeline", "count": 3},
+        {"name": "social_post", "count": 0},
     ],
     "platform_limits": {
         "facebook_reels": 2,
@@ -37,6 +38,7 @@ DEFAULT_CONFIG = {
     "launchers": {
         "youtube_short": str(ROOT / "scripts" / "run_youtube_short_job.sh"),
         "dub_pipeline": str(ROOT / "scripts" / "run_dub_pipeline_job.sh"),
+        "social_post": str(ROOT / "scripts" / "run_social_post_job.sh"),
     },
     "launch_probe_seconds": 8,
 }
@@ -54,6 +56,12 @@ JOB_HEALTH = {
         "log": ROOT / "dub_cron.log",
         "start_text": "START dub_pipeline",
         "process_pattern": "[s]rc/dub_cron.py",
+    },
+    "social_post": {
+        "lock": Path("/tmp/moneyprinterv2-social-post.lock"),
+        "log": ROOT / "social_posts.log",
+        "start_text": "START social_post",
+        "process_pattern": "[s]rc/social_post_cron.py",
     },
 }
 
@@ -246,6 +254,7 @@ def active_job_exists() -> bool:
     lock_paths = [
         Path("/tmp/moneyprinterv2-youtube-short.lock"),
         Path("/tmp/moneyprinterv2-dub-pipeline.lock"),
+        Path("/tmp/moneyprinterv2-social-post.lock"),
     ]
     if any(path.exists() for path in lock_paths):
         return True
@@ -253,6 +262,7 @@ def active_job_exists() -> bool:
     checks = [
         ["pgrep", "-f", "[s]rc/cron.py youtube"],
         ["pgrep", "-f", "[s]rc/dub_cron.py"],
+        ["pgrep", "-f", "[s]rc/social_post_cron.py"],
     ]
     for cmd in checks:
         result = subprocess.run(cmd, check=False, capture_output=True, text=True)

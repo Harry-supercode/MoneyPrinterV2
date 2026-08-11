@@ -23,6 +23,7 @@ copy_script() {
 
 copy_script "$ROOT_DIR/scripts/run_youtube_short_job.sh" "run_youtube_short_job.sh"
 copy_script "$ROOT_DIR/scripts/run_dub_pipeline_job.sh" "run_dub_pipeline_job.sh"
+copy_script "$ROOT_DIR/scripts/run_social_post_job.sh" "run_social_post_job.sh"
 copy_script "$ROOT_DIR/scripts/run_random_scheduler.sh" "run_random_scheduler.sh"
 
 copy_script "$ROOT_DIR/scripts/launch_youtube_short_terminal.sh" "launch_youtube_short_terminal.sh"

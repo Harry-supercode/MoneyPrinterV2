@@ -35,6 +35,9 @@ class Luma:
         resolution: str,
         aspect_ratio: str,
     ) -> str:
+        if duration in {"5", "9"}:
+            duration = f"{duration}s"
+
         payload = {
             "prompt": prompt,
             "model": model,

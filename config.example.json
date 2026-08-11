@@ -95,6 +95,7 @@
   "dub_pipeline": {
     "enabled": false,
     "sources": ["xiaohongshu"],
+    "fallback_source_urls": [],
     "discovery_mode": "explore",
     "max_candidates": 12,
     "discovery_wait_seconds": 12,
@@ -150,6 +151,36 @@
       "facebook_reels": false
     }
   },
+  "social_posts": {
+    "enabled": false,
+    "automation_verified": false,
+    "browser_profile": "",
+    "output_root": "output/social_posts",
+    "language": "vi",
+    "brand_name": "HIEMEE",
+    "tone": "concise, useful, founder-led",
+    "max_chars": 900,
+    "topics": [
+      "HIEMEE business ecosystem",
+      "restaurant cashflow to software systems",
+      "Hie-Software business operating system",
+      "hieFundi transparent community finance",
+      "HieEVPlus green mobility platform"
+    ],
+    "image_paths": [],
+    "platforms": {
+      "facebook": {
+        "enabled": true,
+        "create_url": "https://www.facebook.com/",
+        "post_wait_seconds": 12
+      },
+      "youtube": {
+        "enabled": false,
+        "create_url": "https://www.youtube.com/",
+        "post_wait_seconds": 12
+      }
+    }
+  },
   "threads": 2,
   "zip_url": "",
   "is_for_kids": false,
@@ -197,6 +228,10 @@
       {
         "name": "dub_pipeline",
         "count": 3
+      },
+      {
+        "name": "social_post",
+        "count": 0
       }
     ],
     "platform_limits": {
@@ -205,7 +240,8 @@
     },
     "launchers": {
       "youtube_short": "scripts/run_youtube_short_job.sh",
-      "dub_pipeline": "scripts/run_dub_pipeline_job.sh"
+      "dub_pipeline": "scripts/run_dub_pipeline_job.sh",
+      "social_post": "scripts/run_social_post_job.sh"
     },
     "launch_probe_seconds": 8
   }

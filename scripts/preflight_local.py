@@ -119,14 +119,67 @@ def main() -> int:
     if api_key:
         ok("nanobanana2_api_key is set")
     else:
-        fail("nanobanana2_api_key is empty (and GEMINI_API_KEY is not set)")
-        failures += 1
+        warn("nanobanana2_api_key is empty (and GEMINI_API_KEY is not set)")
 
     reachable, detail = check_url(nb2_base, timeout=8)
     if not reachable:
         warn(f"Nano Banana 2 base URL could not be reached: {detail}")
     else:
         ok(f"Nano Banana 2 base URL reachable: {nb2_base}")
+
+    ai_video = cfg.get("ai_video", {})
+    if isinstance(ai_video, dict) and ai_video.get("enabled"):
+        provider = str(ai_video.get("provider", "runway")).strip().lower()
+        if provider == "luma":
+            luma_api_key = str(cfg.get("luma_api_key") or os.environ.get("LUMA_API_KEY", "")).strip()
+            if luma_api_key:
+                ok("ai_video.provider=luma and luma_api_key is set")
+                try:
+                    response = requests.get(
+                        "https://api.lumalabs.ai/dream-machine/v1/generations",
+                        headers={
+                            "accept": "application/json",
+                            "authorization": f"Bearer {luma_api_key}",
+                        },
+                        timeout=15,
+                    )
+                    if response.status_code in {200, 204}:
+                        ok("Luma API authentication succeeded")
+                    else:
+                        fail(
+                            "Luma API authentication failed: "
+                            f"HTTP {response.status_code} {response.text[:200]}"
+                        )
+                        failures += 1
+                except Exception as exc:
+                    fail(f"Luma API authentication check failed: {exc}")
+                    failures += 1
+            else:
+                fail("ai_video.provider=luma but luma_api_key is empty")
+                failures += 1
+        elif provider == "runway":
+            if (
+                cfg.get("runway_api_key")
+                or os.environ.get("RUNWAYML_API_SECRET")
+                or os.environ.get("RUNWAY_API_KEY")
+            ):
+                ok("ai_video.provider=runway and runway_api_key is set")
+            else:
+                fail("ai_video.provider=runway but runway_api_key is empty")
+                failures += 1
+        else:
+            fail(f"Unsupported ai_video.provider={provider}")
+            failures += 1
+
+        if cfg.get("pexels_api_key") or os.environ.get("PEXELS_API_KEY"):
+            ok("AI hook has a configured public image source provider")
+        else:
+            fail(
+                "ai_video is enabled but pexels_api_key/PEXELS_API_KEY is empty. "
+                "The current Luma/Runway image-to-video hook needs a public image URL; "
+                "Nano Banana images are stored locally and cannot be used as keyframes yet."
+            )
+            failures += 1
 
     if stt_provider == "local_whisper":
         try:

@@ -61,6 +61,7 @@ class DubPipelineConfigTests(unittest.TestCase):
 
         self.assertTrue(dub_config["enabled"])
         self.assertEqual(dub_config["sources"], ["xiaohongshu"])
+        self.assertEqual(dub_config["fallback_source_urls"], [])
         self.assertEqual(dub_config["topics"], [])
         self.assertEqual(dub_config["background_volume"], 1.0)
         self.assertEqual(dub_config["max_video_duration_seconds"], 5)
@@ -68,6 +69,32 @@ class DubPipelineConfigTests(unittest.TestCase):
         self.assertTrue(dub_config["upload"]["youtube"])
         self.assertFalse(dub_config["upload"]["tiktok"])
         self.assertTrue(dub_config["upload"]["facebook_reels"])
+
+    def test_dub_pipeline_preserves_fallback_source_urls(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.write_config(
+                temp_dir,
+                {
+                    "dub_pipeline": {
+                        "fallback_source_urls": [
+                            " https://www.youtube.com/watch?v=abc123 ",
+                            "",
+                            "https://example.com/video.mp4",
+                        ],
+                    }
+                },
+            )
+
+            with patch.object(config, "ROOT_DIR", temp_dir):
+                dub_config = config.get_dub_pipeline_config()
+
+        self.assertEqual(
+            dub_config["fallback_source_urls"],
+            [
+                "https://www.youtube.com/watch?v=abc123",
+                "https://example.com/video.mp4",
+            ],
+        )
 
     def test_youtube_english_mode_overrides_dub_language_and_tts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

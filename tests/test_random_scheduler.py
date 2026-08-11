@@ -105,6 +105,36 @@ class RandomSchedulerLaunchTests(unittest.TestCase):
         self.assertEqual(slot["launcher_exit"], 75)
         self.assertIn("defer_reason", slot)
 
+    def test_social_post_health_uses_dedicated_lock_and_log(self) -> None:
+        social_lock = self.root / "social.lock"
+        social_log = self.root / "social_posts.log"
+        random_scheduler.JOB_HEALTH = {
+            "social_post": {
+                "lock": social_lock,
+                "log": social_log,
+                "start_text": "START social_post",
+                "process_pattern": "this-process-should-not-exist",
+            }
+        }
+        launcher = self.write_launcher(
+            f"mkdir '{social_lock}'\n"
+            f"echo '[test] START social_post pid=$$ platform=facebook' >> '{social_log}'\n"
+        )
+        slot = {
+            "id": "20260721-02",
+            "job": "social_post",
+            "platforms": {"facebook_reels": False, "tiktok": False},
+            "override_platform_uploads": False,
+        }
+
+        result = random_scheduler.launch_slot(
+            slot,
+            {"launchers": {"social_post": launcher}, "launch_probe_seconds": 1},
+        )
+
+        self.assertTrue(result)
+        self.assertEqual(slot["status"], "launched")
+
 
 if __name__ == "__main__":
     unittest.main()

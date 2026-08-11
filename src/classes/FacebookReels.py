@@ -366,6 +366,18 @@ class FacebookReels:
                     text=True,
                 )
                 return result.stdout
+            if platform.system() == "Linux":
+                for command in (["xclip", "-selection", "clipboard", "-o"], ["xsel", "-b", "-o"]):
+                    try:
+                        result = subprocess.run(
+                            command,
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                        return result.stdout
+                    except Exception:
+                        continue
         except Exception:
             return None
 
@@ -381,6 +393,18 @@ class FacebookReels:
                     text=True,
                 )
                 return True
+            if platform.system() == "Linux":
+                for command in (["xclip", "-selection", "clipboard"], ["xsel", "-b", "-i"]):
+                    try:
+                        subprocess.run(
+                            command,
+                            input=text,
+                            check=True,
+                            text=True,
+                        )
+                        return True
+                    except Exception:
+                        continue
         except Exception as exc:
             warning(f"Could not use system clipboard for Facebook caption: {exc}")
             return False
@@ -398,21 +422,23 @@ class FacebookReels:
             const el = arguments[0];
             const value = arguments[1];
             el.focus();
-            if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
-                el.value = value;
-            } else {
-                el.textContent = value;
+            const selection = window.getSelection();
+            if (selection) {
+                selection.removeAllRanges();
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                selection.addRange(range);
             }
-            el.dispatchEvent(new InputEvent('beforeinput', {
-                bubbles: true,
-                inputType: 'insertText',
-                data: value
-            }));
-            el.dispatchEvent(new InputEvent('input', {
-                bubbles: true,
-                inputType: 'insertText',
-                data: value
-            }));
+            document.execCommand('delete', false, null);
+            document.execCommand('insertText', false, value);
+            if ((el.innerText || el.textContent || '').trim() !== value.trim()) {
+                if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+                    el.value = value;
+                } else {
+                    el.textContent = value;
+                }
+            }
+            el.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: value}));
             el.dispatchEvent(new Event('change', {bubbles: true}));
             """,
             caption_box,

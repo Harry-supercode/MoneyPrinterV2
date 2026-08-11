@@ -161,6 +161,64 @@ class YouTubeBrandTopicsConfigTests(unittest.TestCase):
         )
 
 
+class SocialPostsConfigTests(unittest.TestCase):
+    def write_config(self, directory: str, payload: dict) -> None:
+        with open(os.path.join(directory, "config.json"), "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+
+    def test_missing_social_posts_uses_safe_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.write_config(temp_dir, {})
+
+            with patch.object(config, "ROOT_DIR", temp_dir):
+                social_posts = config.get_social_posts_config()
+
+        self.assertFalse(social_posts["enabled"])
+        self.assertFalse(social_posts["automation_verified"])
+        self.assertEqual(social_posts["platforms"]["facebook"]["create_url"], "https://www.facebook.com/")
+        self.assertFalse(social_posts["platforms"]["youtube"]["enabled"])
+
+    def test_social_posts_normalizes_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.write_config(
+                temp_dir,
+                {
+                    "social_posts": {
+                        "enabled": True,
+                        "automation_verified": True,
+                        "browser_profile": " /profiles/social ",
+                        "max_chars": "9999",
+                        "topics": [" HIEMEE ", ""],
+                        "image_paths": [" assets/post.png ", ""],
+                        "platforms": {
+                            "facebook": {
+                                "enabled": True,
+                                "create_url": " https://facebook.com/example ",
+                                "post_wait_seconds": "1",
+                            },
+                            "youtube": {
+                                "enabled": True,
+                                "create_url": " https://youtube.com/example ",
+                                "post_wait_seconds": "999",
+                            },
+                        },
+                    }
+                },
+            )
+
+            with patch.object(config, "ROOT_DIR", temp_dir):
+                social_posts = config.get_social_posts_config()
+
+        self.assertTrue(social_posts["enabled"])
+        self.assertTrue(social_posts["automation_verified"])
+        self.assertEqual(social_posts["browser_profile"], "/profiles/social")
+        self.assertEqual(social_posts["max_chars"], 2000)
+        self.assertEqual(social_posts["topics"], ["HIEMEE"])
+        self.assertEqual(social_posts["image_paths"], ["assets/post.png"])
+        self.assertEqual(social_posts["platforms"]["facebook"]["post_wait_seconds"], 3)
+        self.assertEqual(social_posts["platforms"]["youtube"]["post_wait_seconds"], 120)
+
+
 class YouTubeEnglishModeConfigTests(unittest.TestCase):
     def write_config(self, directory: str, payload: dict) -> None:
         with open(os.path.join(directory, "config.json"), "w", encoding="utf-8") as handle:
@@ -242,6 +300,28 @@ class AIVideoConfigTests(unittest.TestCase):
         self.assertTrue(ai_video_config["enabled"])
         self.assertEqual(ai_video_config["poll_interval_seconds"], 3)
         self.assertEqual(ai_video_config["timeout_seconds"], 60)
+
+    def test_luma_ai_video_uses_luma_defaults_when_model_is_runway_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.write_config(
+                temp_dir,
+                {
+                    "ai_video": {
+                        "enabled": True,
+                        "provider": "luma",
+                        "model": "gen4.5",
+                        "duration": "5",
+                    }
+                },
+            )
+
+            with patch.object(config, "ROOT_DIR", temp_dir):
+                ai_video_config = config.get_ai_video_config()
+
+        self.assertTrue(ai_video_config["enabled"])
+        self.assertEqual(ai_video_config["provider"], "luma")
+        self.assertEqual(ai_video_config["model"], "ray-2")
+        self.assertEqual(ai_video_config["duration"], "5s")
 
 
 if __name__ == "__main__":
