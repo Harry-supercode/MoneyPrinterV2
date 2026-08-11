@@ -81,7 +81,8 @@ class FacebookPost:
             if image_path:
                 self._attach_image(driver, image_path)
 
-            self._click_button(driver, FACEBOOK_POST_BUTTON_MARKERS, "Facebook Post", 60)
+            self._capture_evidence(driver, "facebook-post-before-click")
+            self._click_publish_button(driver, timeout=60)
             time.sleep(self.post_wait_seconds)
             evidence = self._capture_evidence(driver, "facebook-post-after-click")
             verification = self._verify_publish_result(driver)
@@ -288,6 +289,79 @@ class FacebookPost:
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
         time.sleep(1)
         driver.execute_script("arguments[0].click();", button)
+
+    def _click_publish_button(self, driver: webdriver.Firefox, timeout: int = 60) -> None:
+        button = self._find_publish_button(driver, timeout)
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+        time.sleep(1)
+
+        for attempt in range(3):
+            driver.execute_script("arguments[0].click();", button)
+            time.sleep(3)
+            if not self._composer_is_open(driver):
+                return
+            if attempt < 2:
+                button = self._find_publish_button(driver, 10)
+
+    def _find_publish_button(self, driver: webdriver.Firefox, timeout: int) -> WebElement:
+        def find(current_driver: webdriver.Firefox):
+            button = current_driver.execute_script(
+                """
+                const markers = arguments[0].map((value) => String(value).toLowerCase());
+                const exactMarkers = new Set(markers);
+
+                function textFor(el) {
+                    return [
+                        el.innerText || '',
+                        el.textContent || '',
+                        el.getAttribute('aria-label') || '',
+                        el.getAttribute('title') || ''
+                    ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                }
+
+                function isVisible(el) {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width > 20 && rect.height > 12 &&
+                        style.display !== 'none' &&
+                        style.visibility !== 'hidden' &&
+                        Number(style.opacity || 1) > 0;
+                }
+
+                function isEnabled(el) {
+                    const style = window.getComputedStyle(el);
+                    return !el.disabled &&
+                        el.getAttribute('aria-disabled') !== 'true' &&
+                        !String(el.getAttribute('class') || '').toLowerCase().includes('disabled') &&
+                        style.pointerEvents !== 'none';
+                }
+
+                const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                    .filter(isVisible);
+                const root = dialogs.length ? dialogs[dialogs.length - 1] : document;
+                const candidates = Array.from(root.querySelectorAll("div[role='button'], button, a[role='button']"))
+                    .filter(isVisible)
+                    .filter(isEnabled)
+                    .map((el) => {
+                        const text = textFor(el);
+                        const rect = el.getBoundingClientRect();
+                        let score = 0;
+                        if (exactMarkers.has(text)) score += 1000;
+                        if (markers.some((marker) => text.includes(marker))) score += 300;
+                        if (text === 'post' || text === 'đăng') score += 500;
+                        score += Math.round(rect.top / 10);
+                        score += Math.round(rect.left / 20);
+                        return {el, text, score};
+                    })
+                    .filter((item) => item.score >= 300)
+                    .sort((a, b) => b.score - a.score);
+                return candidates.length ? candidates[0].el : null;
+                """,
+                FACEBOOK_POST_BUTTON_MARKERS,
+            )
+            return button or False
+
+        return WebDriverWait(driver, timeout).until(find)
 
     def _try_click_button(
         self,
