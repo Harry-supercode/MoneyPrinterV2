@@ -2,12 +2,14 @@ import hashlib
 import json
 import os
 import random
+import re
 from datetime import datetime
 from pathlib import Path
 
 from config import ROOT_DIR, get_youtube_brand_topics_config
 from llm_provider import generate_text
 from status import warning
+from .SocialPostImageGenerator import SocialPostImageGenerator
 
 
 class SocialPostGenerator:
@@ -21,6 +23,8 @@ class SocialPostGenerator:
         topic = self._select_topic()
         text = self._generate_text(topic)
         image_path = self._select_image_path()
+        if not image_path:
+            image_path = SocialPostImageGenerator(self.config).generate(topic, text)
         draft = {
             "id": self._draft_id(text, image_path),
             "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -70,8 +74,9 @@ class SocialPostGenerator:
             "- No markdown headings.\n"
             "- No fake metrics, guarantees, or unsupported claims.\n"
             "- Avoid clickbait.\n"
+            "- Do not write hashtags. A fixed footer will be appended separately.\n"
             f"- Maximum {max_chars} characters.\n"
-            "- End with 2 to 5 relevant hashtags."
+            "- Write only the main post body."
         )
         try:
             text = generate_text(prompt).strip()
@@ -90,11 +95,23 @@ class SocialPostGenerator:
     def _clean_text(self, text: str, max_chars: int) -> str:
         cleaned = str(text).replace("```", "").strip().strip('"')
         cleaned = "\n".join(line.rstrip() for line in cleaned.splitlines()).strip()
+        cleaned = self._strip_body_hashtags(cleaned)
         if len(cleaned) <= max_chars:
             return cleaned
 
         truncated = cleaned[: max_chars - 3].rsplit(" ", 1)[0].strip()
         return f"{truncated}..."
+
+    def _strip_body_hashtags(self, text: str) -> str:
+        lines = []
+        for line in str(text).splitlines():
+            cleaned_line = re.sub(r"(?<!\w)#\w+", "", line).rstrip()
+            if cleaned_line.strip():
+                lines.append(cleaned_line)
+            elif lines and lines[-1] != "":
+                lines.append("")
+
+        return "\n".join(lines).strip()
 
     def _append_footer(self, text: str) -> str:
         footer = str(self.config.get("post_footer", "")).strip()

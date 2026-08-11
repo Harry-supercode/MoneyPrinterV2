@@ -178,6 +178,7 @@ class SocialPostsConfigTests(unittest.TestCase):
         self.assertEqual(social_posts["platforms"]["facebook"]["create_url"], "https://www.facebook.com/")
         self.assertFalse(social_posts["platforms"]["youtube"]["enabled"])
         self.assertIn("#Hiemee #HieFundi", social_posts["post_footer"])
+        self.assertFalse(social_posts["image_generation"]["enabled"])
 
     def test_social_posts_normalizes_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -191,6 +192,11 @@ class SocialPostsConfigTests(unittest.TestCase):
                         "max_chars": "9999",
                         "topics": [" HIEMEE ", ""],
                         "image_paths": [" assets/post.png ", ""],
+                        "image_generation": {
+                            "enabled": True,
+                            "provider": " pexels ",
+                            "style": " clean ",
+                        },
                         "post_footer": " Footer text ",
                         "platforms": {
                             "facebook": {
@@ -217,6 +223,9 @@ class SocialPostsConfigTests(unittest.TestCase):
         self.assertEqual(social_posts["max_chars"], 2000)
         self.assertEqual(social_posts["topics"], ["HIEMEE"])
         self.assertEqual(social_posts["image_paths"], ["assets/post.png"])
+        self.assertTrue(social_posts["image_generation"]["enabled"])
+        self.assertEqual(social_posts["image_generation"]["provider"], "pexels")
+        self.assertEqual(social_posts["image_generation"]["style"], "clean")
         self.assertEqual(social_posts["post_footer"], "Footer text")
         self.assertEqual(social_posts["platforms"]["facebook"]["post_wait_seconds"], 3)
         self.assertEqual(social_posts["platforms"]["youtube"]["post_wait_seconds"], 120)

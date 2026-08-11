@@ -49,6 +49,28 @@ class SocialPostGeneratorTests(unittest.TestCase):
 
         self.assertEqual(text.count("#Hiemee"), 1)
 
+    def test_strips_generated_body_hashtags_and_keeps_footer_hashtags(self) -> None:
+        generator = SocialPostGenerator(
+            {
+                "output_root": "output/social_posts",
+                "language": "vi",
+                "brand_name": "HIEMEE",
+                "tone": "concise",
+                "max_chars": 500,
+                "post_footer": "#Hiemee #HieFundi",
+            }
+        )
+
+        with patch(
+            "classes.SocialPostGenerator.generate_text",
+            return_value="Nội dung chính #SaiHashtag\n\n#AnotherBadTag",
+        ):
+            text = generator._generate_text("HieFundi")
+
+        self.assertNotIn("#SaiHashtag", text)
+        self.assertNotIn("#AnotherBadTag", text)
+        self.assertTrue(text.endswith("#Hiemee #HieFundi"))
+
 
 if __name__ == "__main__":
     unittest.main()

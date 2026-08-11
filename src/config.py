@@ -758,6 +758,11 @@ def get_social_posts_config() -> dict:
         "max_chars": 900,
         "topics": [],
         "image_paths": [],
+        "image_generation": {
+            "enabled": False,
+            "provider": "nanobanana2",
+            "style": "professional Vietnamese technology brand visual, clean modern, trustworthy",
+        },
         "post_footer": (
             "#Hiemee #HieFundi #HieRealy #HieEVPlus #MapTechnology #LocationBasedService\n"
             "🌟 Nền tảng nổi bật:\n"
@@ -835,6 +840,12 @@ def get_social_posts_config() -> dict:
     image_paths = raw_config.get("image_paths", defaults["image_paths"])
     if not isinstance(image_paths, list):
         image_paths = defaults["image_paths"]
+    raw_image_generation = raw_config.get(
+        "image_generation",
+        defaults["image_generation"],
+    )
+    if not isinstance(raw_image_generation, dict):
+        raw_image_generation = defaults["image_generation"]
 
     return {
         "enabled": bool(raw_config.get("enabled", defaults["enabled"])),
@@ -865,6 +876,28 @@ def get_social_posts_config() -> dict:
             for image_path in image_paths
             if str(image_path).strip()
         ],
+        "image_generation": {
+            "enabled": bool(
+                raw_image_generation.get(
+                    "enabled",
+                    defaults["image_generation"]["enabled"],
+                )
+            ),
+            "provider": str(
+                raw_image_generation.get(
+                    "provider",
+                    defaults["image_generation"]["provider"],
+                )
+            ).strip()
+            or defaults["image_generation"]["provider"],
+            "style": str(
+                raw_image_generation.get(
+                    "style",
+                    defaults["image_generation"]["style"],
+                )
+            ).strip()
+            or defaults["image_generation"]["style"],
+        },
         "post_footer": str(
             raw_config.get("post_footer", defaults["post_footer"])
         ).strip(),
