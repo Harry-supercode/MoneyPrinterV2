@@ -179,6 +179,7 @@ class SocialPostsConfigTests(unittest.TestCase):
         self.assertFalse(social_posts["platforms"]["youtube"]["enabled"])
         self.assertIn("#Hiemee #HieFundi", social_posts["post_footer"])
         self.assertFalse(social_posts["image_generation"]["enabled"])
+        self.assertEqual(social_posts["facebook_groups"]["group_names"], [])
 
     def test_social_posts_normalizes_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -196,6 +197,15 @@ class SocialPostsConfigTests(unittest.TestCase):
                             "enabled": True,
                             "provider": " pexels ",
                             "style": " clean ",
+                        },
+                        "facebook_groups": {
+                            "enabled": True,
+                            "max_groups_per_post": "10",
+                            "group_urls": [
+                                " https://www.facebook.com/groups/1018579577383767 ",
+                                "",
+                            ],
+                            "group_names": [" Cộng đồng Hiemee ", ""],
                         },
                         "post_footer": " Footer text ",
                         "platforms": {
@@ -226,6 +236,16 @@ class SocialPostsConfigTests(unittest.TestCase):
         self.assertTrue(social_posts["image_generation"]["enabled"])
         self.assertEqual(social_posts["image_generation"]["provider"], "pexels")
         self.assertEqual(social_posts["image_generation"]["style"], "clean")
+        self.assertTrue(social_posts["facebook_groups"]["enabled"])
+        self.assertEqual(social_posts["facebook_groups"]["max_groups_per_post"], 3)
+        self.assertEqual(
+            social_posts["facebook_groups"]["group_urls"],
+            ["https://www.facebook.com/groups/1018579577383767"],
+        )
+        self.assertEqual(
+            social_posts["facebook_groups"]["group_names"],
+            ["Cộng đồng Hiemee"],
+        )
         self.assertEqual(social_posts["post_footer"], "Footer text")
         self.assertEqual(social_posts["platforms"]["facebook"]["post_wait_seconds"], 3)
         self.assertEqual(social_posts["platforms"]["youtube"]["post_wait_seconds"], 120)

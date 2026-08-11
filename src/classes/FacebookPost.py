@@ -340,10 +340,16 @@ class FacebookPost:
             for url in self.group_config.get("group_urls", [])
             if str(url).strip()
         ]
+        group_names = [
+            str(name).strip()
+            for name in self.group_config.get("group_names", [])
+            if str(name).strip()
+        ]
         max_groups = int(self.group_config.get("max_groups_per_post", 1) or 1)
-        group_urls = group_urls[: max(1, max_groups)]
-        if not group_urls:
-            return {"attempted": False, "enabled": True, "reason": "no_group_urls"}
+        max_groups = max(1, max_groups)
+        targets = self._build_group_targets(group_urls, group_names)[:max_groups]
+        if not targets:
+            return {"attempted": False, "enabled": True, "reason": "no_groups"}
 
         selected = []
         try:
@@ -351,16 +357,16 @@ class FacebookPost:
             self._click_share_to_groups(driver)
             time.sleep(3)
 
-            for group_url in group_urls:
-                if self._select_group(driver, group_url):
-                    selected.append(group_url)
+            for target in targets:
+                if self._select_group(driver, target):
+                    selected.append(target)
                     time.sleep(1)
 
             self._return_from_group_picker(driver)
             return {
                 "attempted": True,
                 "enabled": True,
-                "selected": selected,
+                "selected": [target["label"] for target in selected],
                 "success": bool(selected),
             }
         except Exception as exc:
@@ -368,10 +374,34 @@ class FacebookPost:
             return {
                 "attempted": True,
                 "enabled": True,
-                "selected": selected,
+                "selected": [target["label"] for target in selected],
                 "success": False,
                 "reason": str(exc),
             }
+
+    def _build_group_targets(
+        self,
+        group_urls: list[str],
+        group_names: list[str],
+    ) -> list[dict[str, str]]:
+        targets = []
+        max_len = max(len(group_urls), len(group_names))
+        for index in range(max_len):
+            group_url = group_urls[index] if index < len(group_urls) else ""
+            group_name = group_names[index] if index < len(group_names) else ""
+            group_id = self._extract_group_id(group_url)
+            label = group_name or group_id or group_url
+            if not label:
+                continue
+            targets.append(
+                {
+                    "name": group_name,
+                    "url": group_url,
+                    "id": group_id,
+                    "label": label,
+                }
+            )
+        return targets
 
     def _click_share_to_groups(self, driver: webdriver.Firefox) -> None:
         element = self._find_dialog_row_by_markers(
@@ -383,17 +413,21 @@ class FacebookPost:
         time.sleep(1)
         driver.execute_script("arguments[0].click();", element)
 
-    def _select_group(self, driver: webdriver.Firefox, group_url: str) -> bool:
-        group_id = self._extract_group_id(group_url)
-        search_terms = [term for term in [group_id, group_url] if term]
+    def _select_group(self, driver: webdriver.Firefox, target: dict[str, str]) -> bool:
+        group_name = target.get("name", "")
+        group_id = target.get("id", "")
+        group_url = target.get("url", "")
+        search_terms = [term for term in [group_name, group_id, group_url] if term]
 
-        self._try_search_group(driver, search_terms[0] if search_terms else group_url)
+        self._try_search_group(driver, search_terms[0] if search_terms else "")
         time.sleep(2)
 
         clicked = driver.execute_script(
             """
-            const groupId = arguments[0];
-            const groupUrl = arguments[1].toLowerCase();
+            const groupName = String(arguments[0] || '').toLowerCase();
+            const groupId = String(arguments[1] || '').toLowerCase();
+            const groupUrl = String(arguments[2] || '').toLowerCase();
+            const exactTerms = [groupName, groupId, groupUrl].filter(Boolean);
 
             function isVisible(el) {
                 const rect = el.getBoundingClientRect();
@@ -417,26 +451,18 @@ class FacebookPost:
                 .filter(isVisible)
                 .filter((el) => {
                     const text = textFor(el);
-                    return (groupId && text.includes(groupId)) || text.includes(groupUrl);
+                    if (!exactTerms.some((term) => text.includes(term))) return false;
+                    return !text.includes('search') && !text.includes('tìm kiếm');
                 });
 
             let target = candidates[0];
-            if (!target) {
-                const fallback = Array.from(document.querySelectorAll("div[role='button'], label, input[type='checkbox']"))
-                    .filter(isVisible)
-                    .filter((el) => {
-                        const text = textFor(el);
-                        return !text.includes('search') && !text.includes('tìm kiếm');
-                    });
-                target = fallback[0];
-            }
-
             if (!target) return false;
             const button = target.closest("div[role='button'], label") || target;
             button.scrollIntoView({block: 'center'});
             button.click();
             return true;
             """,
+            group_name,
             group_id,
             group_url,
         )

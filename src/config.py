@@ -767,6 +767,7 @@ def get_social_posts_config() -> dict:
             "enabled": False,
             "max_groups_per_post": 1,
             "group_urls": [],
+            "group_names": [],
         },
         "post_footer": (
             "#Hiemee #HieFundi #HieRealy #HieEVPlus #MapTechnology #LocationBasedService\n"
@@ -863,6 +864,12 @@ def get_social_posts_config() -> dict:
     )
     if not isinstance(raw_group_urls, list):
         raw_group_urls = defaults["facebook_groups"]["group_urls"]
+    raw_group_names = raw_facebook_groups.get(
+        "group_names",
+        defaults["facebook_groups"]["group_names"],
+    )
+    if not isinstance(raw_group_names, list):
+        raw_group_names = defaults["facebook_groups"]["group_names"]
     try:
         max_groups_per_post = int(
             raw_facebook_groups.get(
@@ -936,6 +943,11 @@ def get_social_posts_config() -> dict:
                 str(group_url).strip()
                 for group_url in raw_group_urls
                 if str(group_url).strip()
+            ],
+            "group_names": [
+                str(group_name).strip()
+                for group_name in raw_group_names
+                if str(group_name).strip()
             ],
         },
         "post_footer": str(
