@@ -758,6 +758,21 @@ def get_social_posts_config() -> dict:
         "max_chars": 900,
         "topics": [],
         "image_paths": [],
+        "post_footer": (
+            "#Hiemee #HieFundi #HieRealy #HieEVPlus #MapTechnology #LocationBasedService\n"
+            "🌟 Nền tảng nổi bật:\n"
+            "• HieRealty – Mạng xã hội bất động sản\n"
+            "https://apps.apple.com/vn/app/hiemee/id6450173202\n\n"
+            "• HieEVPlus – Quản lý và theo dõi hiệu quả đầu tư xe điện\n"
+            "https://apps.apple.com/us/app/hieevplus/id6767504271\n\n"
+            "• HieFundi – Nền tảng quỹ đầu tư số\n\n"
+            "🌐 Website: https://hiemee.com\n"
+            "📘 Facebook: https://www.facebook.com/hiemeejsc/\n"
+            "👥 Nhóm Hiemee: https://www.facebook.com/share/g/1H2xvJGVXj/\n"
+            "🎵 TikTok: https://www.tiktok.com/@hiemedia\n"
+            "▶️ YouTube: https://www.youtube.com/@hiemeejsc\n"
+            "📩 Email: contact@hiemee.com"
+        ),
         "platforms": {
             "facebook": {
                 "enabled": True,
@@ -850,6 +865,9 @@ def get_social_posts_config() -> dict:
             for image_path in image_paths
             if str(image_path).strip()
         ],
+        "post_footer": str(
+            raw_config.get("post_footer", defaults["post_footer"])
+        ).strip(),
         "platforms": {
             "facebook": platform_config("facebook"),
             "youtube": platform_config("youtube"),

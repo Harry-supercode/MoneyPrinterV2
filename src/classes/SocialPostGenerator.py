@@ -84,7 +84,8 @@ class SocialPostGenerator:
                 "#HIEMEE #BusinessAutomation #FounderJourney"
             )
 
-        return self._clean_text(text, max_chars)
+        body = self._clean_text(text, max_chars)
+        return self._append_footer(body)
 
     def _clean_text(self, text: str, max_chars: int) -> str:
         cleaned = str(text).replace("```", "").strip().strip('"')
@@ -94,6 +95,19 @@ class SocialPostGenerator:
 
         truncated = cleaned[: max_chars - 3].rsplit(" ", 1)[0].strip()
         return f"{truncated}..."
+
+    def _append_footer(self, text: str) -> str:
+        footer = str(self.config.get("post_footer", "")).strip()
+        if not footer:
+            return text
+
+        cleaned_text = str(text).strip()
+        if footer in cleaned_text:
+            return cleaned_text
+        if not cleaned_text:
+            return footer
+
+        return f"{cleaned_text}\n\n{footer}"
 
     def _select_image_path(self) -> str:
         image_paths = self.config.get("image_paths") or []
