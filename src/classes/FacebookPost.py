@@ -39,6 +39,13 @@ FACEBOOK_POST_BUTTON_MARKERS = [
     "chia sẻ",
 ]
 
+FACEBOOK_NEXT_BUTTON_MARKERS = [
+    "next",
+    "continue",
+    "tiếp",
+    "tiếp tục",
+]
+
 FACEBOOK_PHOTO_BUTTON_MARKERS = [
     "photo",
     "photo/video",
@@ -82,6 +89,9 @@ class FacebookPost:
                 self._attach_image(driver, image_path)
 
             self._capture_evidence(driver, "facebook-post-before-click")
+            if self._try_click_next_button(driver, timeout=20):
+                time.sleep(3)
+                self._capture_evidence(driver, "facebook-post-after-next")
             self._click_publish_button(driver, timeout=60)
             time.sleep(self.post_wait_seconds)
             evidence = self._capture_evidence(driver, "facebook-post-after-click")
@@ -372,7 +382,27 @@ class FacebookPost:
             if attempt < 2:
                 button = self._find_publish_button(driver, 10)
 
+    def _try_click_next_button(self, driver: webdriver.Firefox, timeout: int = 20) -> bool:
+        try:
+            button = self._find_dialog_button(driver, FACEBOOK_NEXT_BUTTON_MARKERS, timeout)
+        except Exception:
+            return False
+
+        info(" => Clicking Facebook Next/Continue button...")
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+        time.sleep(1)
+        driver.execute_script("arguments[0].click();", button)
+        return True
+
     def _find_publish_button(self, driver: webdriver.Firefox, timeout: int) -> WebElement:
+        return self._find_dialog_button(driver, FACEBOOK_POST_BUTTON_MARKERS, timeout)
+
+    def _find_dialog_button(
+        self,
+        driver: webdriver.Firefox,
+        markers: list[str],
+        timeout: int,
+    ) -> WebElement:
         def find(current_driver: webdriver.Firefox):
             button = current_driver.execute_script(
                 """
@@ -426,7 +456,7 @@ class FacebookPost:
                     .sort((a, b) => b.score - a.score);
                 return candidates.length ? candidates[0].el : null;
                 """,
-                FACEBOOK_POST_BUTTON_MARKERS,
+                markers,
             )
             return button or False
 
