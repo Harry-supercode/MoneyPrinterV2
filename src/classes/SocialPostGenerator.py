@@ -75,6 +75,9 @@ class SocialPostGenerator:
             "- No markdown headings.\n"
             "- No fake metrics, guarantees, or unsupported claims.\n"
             "- Avoid clickbait.\n"
+            "- Do not claim HIEMEE has leading experts, market leadership, awards, or partnerships unless provided.\n"
+            "- Do not add greetings like 'Hi mọi người'.\n"
+            "- Do not add contact calls-to-action; the footer already contains contact details.\n"
             "- Do not write hashtags. A fixed footer will be appended separately.\n"
             "- Do not write a footer, contact block, links, or social channel list.\n"
             f"- Maximum {max_chars} characters.\n"
@@ -110,6 +113,12 @@ class SocialPostGenerator:
         blocked_prefixes = (
             "footer:",
             "liên hệ:",
+            "hãy liên hệ",
+            "nếu bạn cần",
+            "nếu bạn quan tâm",
+            "để biết thêm",
+            "inbox",
+            "nhắn tin",
             "contact:",
             "website:",
             "facebook:",
@@ -130,6 +139,17 @@ class SocialPostGenerator:
         # Strip unexpected Thai/Lao/Khmer/Myanmar script fragments that local LLMs
         # sometimes mix into Vietnamese words.
         cleaned = re.sub(r"[\u0E00-\u0E7F\u0E80-\u0EFF\u1780-\u17FF\u1000-\u109F]+", "", text)
+        cleaned = re.sub(r"\bphát triển(?=doanh nghiệp|doanh|kinh doanh|công ty)", "phát triển ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bdoanh nghiệp\b", "doanh nghiệp", cleaned)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        cleaned = re.sub(
+            r"^\s*(hi|hello|xin chào)\s+(mọi người|cả nhà)[!,.]?\s*",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = cleaned.replace("đội ngũ chuyên gia hàng đầu", "đội ngũ phát triển")
+        cleaned = cleaned.replace("chuyên gia hàng đầu", "đội ngũ chuyên môn")
         return cleaned
 
     def _strip_body_hashtags(self, text: str) -> str:

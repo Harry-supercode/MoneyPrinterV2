@@ -98,6 +98,33 @@ class SocialPostGeneratorTests(unittest.TestCase):
         self.assertIn("phát triển", text)
         self.assertTrue(text.endswith("#Hiemee"))
 
+    def test_strips_generated_contact_cta_and_unsupported_claims(self) -> None:
+        generator = SocialPostGenerator(
+            {
+                "output_root": "output/social_posts",
+                "language": "Vietnamese",
+                "brand_name": "HIEMEE",
+                "tone": "concise",
+                "max_chars": 900,
+                "post_footer": "#Hiemee",
+            }
+        )
+
+        with patch(
+            "classes.SocialPostGenerator.generate_text",
+            return_value=(
+                "Hi mọi người! HIEMEE đang phát triển Map Technology.\n\n"
+                "Được hỗ trợ bởi đội ngũ chuyên gia hàng đầu, HIEMEE sẵn sàng hợp tác.\n\n"
+                "Hãy liên hệ với chúng tôi để biết..."
+            ),
+        ):
+            text = generator._generate_text("MapTechnology")
+
+        self.assertNotIn("chuyên gia hàng đầu", text)
+        self.assertNotIn("Hi mọi người", text)
+        self.assertNotIn("Hãy liên hệ", text)
+        self.assertTrue(text.endswith("#Hiemee"))
+
 
 if __name__ == "__main__":
     unittest.main()
