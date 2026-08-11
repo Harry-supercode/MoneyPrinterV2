@@ -370,7 +370,15 @@ class FacebookPost:
         driver.execute_script("arguments[0].click();", button)
 
     def _click_publish_button(self, driver: webdriver.Firefox, timeout: int = 60) -> None:
-        button = self._find_publish_button(driver, timeout)
+        try:
+            button = self._find_publish_button(driver, timeout)
+        except Exception:
+            if self._click_dialog_bottom_primary_button(driver, "Facebook Post fallback"):
+                time.sleep(3)
+                if not self._composer_is_open(driver):
+                    return
+            raise
+
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
         time.sleep(1)
 
@@ -391,6 +399,9 @@ class FacebookPost:
                 allow_primary_fallback=True,
             )
         except Exception:
+            if self._click_dialog_bottom_primary_button(driver, "Facebook Next/Continue fallback"):
+                info(" => Clicked Facebook Next/Continue button by dialog-bottom fallback.")
+                return True
             return False
 
         info(" => Clicking Facebook Next/Continue button...")
@@ -484,6 +495,74 @@ class FacebookPost:
             return button or False
 
         return WebDriverWait(driver, timeout).until(find)
+
+    def _click_dialog_bottom_primary_button(
+        self,
+        driver: webdriver.Firefox,
+        label: str,
+    ) -> bool:
+        try:
+            clicked = driver.execute_script(
+                """
+                function isVisible(el) {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width > 40 && rect.height > 20 &&
+                        style.display !== 'none' &&
+                        style.visibility !== 'hidden' &&
+                        Number(style.opacity || 1) > 0;
+                }
+
+                const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                    .filter(isVisible)
+                    .map((el) => ({el, rect: el.getBoundingClientRect()}))
+                    .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
+
+                if (!dialogs.length) return false;
+
+                const rect = dialogs[0].rect;
+                const points = [
+                    [rect.left + rect.width / 2, rect.bottom - 28],
+                    [rect.right - 80, rect.bottom - 28],
+                    [rect.left + rect.width / 2, rect.bottom - 48],
+                ];
+
+                for (const [x, y] of points) {
+                    let el = document.elementFromPoint(x, y);
+                    if (!el) continue;
+
+                    const button = el.closest("div[role='button'], button, a[role='button']") || el;
+                    const style = window.getComputedStyle(button);
+                    if (
+                        button.getAttribute('aria-disabled') === 'true' ||
+                        button.disabled ||
+                        style.pointerEvents === 'none'
+                    ) {
+                        continue;
+                    }
+
+                    button.scrollIntoView({block: 'center'});
+                    for (const eventName of ['mouseover', 'mousedown', 'mouseup', 'click']) {
+                        button.dispatchEvent(new MouseEvent(eventName, {
+                            bubbles: true,
+                            cancelable: true,
+                            view: window,
+                            clientX: x,
+                            clientY: y
+                        }));
+                    }
+                    return true;
+                }
+
+                return false;
+                """
+            )
+            if not clicked:
+                warning(f"Could not click {label}: no dialog-bottom primary target found.")
+            return bool(clicked)
+        except Exception as exc:
+            warning(f"Could not click {label}: {exc}")
+            return False
 
     def _try_click_button(
         self,
