@@ -110,7 +110,12 @@ class SocialPostPipeline:
         wait_seconds = int(platform_config.get("post_wait_seconds", 12))
 
         if platform == "facebook":
-            publisher = FacebookPost(browser_profile, create_url, wait_seconds)
+            publisher = FacebookPost(
+                browser_profile,
+                create_url,
+                wait_seconds,
+                self.config.get("facebook_groups", {}),
+            )
         elif platform == "youtube":
             publisher = YouTubeCommunityPost(browser_profile, create_url, wait_seconds)
         else:

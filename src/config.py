@@ -763,6 +763,11 @@ def get_social_posts_config() -> dict:
             "provider": "nanobanana2",
             "style": "professional Vietnamese technology brand visual, clean modern, trustworthy",
         },
+        "facebook_groups": {
+            "enabled": False,
+            "max_groups_per_post": 1,
+            "group_urls": [],
+        },
         "post_footer": (
             "#Hiemee #HieFundi #HieRealy #HieEVPlus #MapTechnology #LocationBasedService\n"
             "🌟 Nền tảng nổi bật:\n"
@@ -846,6 +851,27 @@ def get_social_posts_config() -> dict:
     )
     if not isinstance(raw_image_generation, dict):
         raw_image_generation = defaults["image_generation"]
+    raw_facebook_groups = raw_config.get(
+        "facebook_groups",
+        defaults["facebook_groups"],
+    )
+    if not isinstance(raw_facebook_groups, dict):
+        raw_facebook_groups = defaults["facebook_groups"]
+    raw_group_urls = raw_facebook_groups.get(
+        "group_urls",
+        defaults["facebook_groups"]["group_urls"],
+    )
+    if not isinstance(raw_group_urls, list):
+        raw_group_urls = defaults["facebook_groups"]["group_urls"]
+    try:
+        max_groups_per_post = int(
+            raw_facebook_groups.get(
+                "max_groups_per_post",
+                defaults["facebook_groups"]["max_groups_per_post"],
+            )
+        )
+    except (TypeError, ValueError):
+        max_groups_per_post = defaults["facebook_groups"]["max_groups_per_post"]
 
     return {
         "enabled": bool(raw_config.get("enabled", defaults["enabled"])),
@@ -897,6 +923,20 @@ def get_social_posts_config() -> dict:
                 )
             ).strip()
             or defaults["image_generation"]["style"],
+        },
+        "facebook_groups": {
+            "enabled": bool(
+                raw_facebook_groups.get(
+                    "enabled",
+                    defaults["facebook_groups"]["enabled"],
+                )
+            ),
+            "max_groups_per_post": max(0, min(max_groups_per_post, 3)),
+            "group_urls": [
+                str(group_url).strip()
+                for group_url in raw_group_urls
+                if str(group_url).strip()
+            ],
         },
         "post_footer": str(
             raw_config.get("post_footer", defaults["post_footer"])

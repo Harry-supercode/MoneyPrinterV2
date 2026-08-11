@@ -1,5 +1,6 @@
 import os
 import platform
+import re
 import subprocess
 import time
 import traceback
@@ -53,12 +54,26 @@ FACEBOOK_PHOTO_BUTTON_MARKERS = [
     "ảnh/video",
 ]
 
+FACEBOOK_SHARE_GROUP_MARKERS = [
+    "share to groups",
+    "share to group",
+    "chia sẻ lên nhóm",
+    "chia sẻ trong nhóm",
+]
+
 
 class FacebookPost:
-    def __init__(self, fp_profile_path: str, create_url: str, post_wait_seconds: int = 12):
+    def __init__(
+        self,
+        fp_profile_path: str,
+        create_url: str,
+        post_wait_seconds: int = 12,
+        group_config: dict | None = None,
+    ):
         self.fp_profile_path = fp_profile_path
         self.create_url = create_url
         self.post_wait_seconds = post_wait_seconds
+        self.group_config = group_config or {}
 
         if not os.path.isdir(self.fp_profile_path):
             raise ValueError(f"Firefox profile path does not exist: {self.fp_profile_path}")
@@ -92,6 +107,9 @@ class FacebookPost:
             if self._try_click_next_button(driver, timeout=20):
                 time.sleep(3)
                 self._capture_evidence(driver, "facebook-post-after-next")
+            group_result = self._configure_group_sharing(driver)
+            if group_result.get("attempted"):
+                self._capture_evidence(driver, "facebook-post-after-group-share")
             self._click_publish_button(driver, timeout=60)
             time.sleep(self.post_wait_seconds)
             evidence = self._capture_evidence(driver, "facebook-post-after-click")
@@ -106,6 +124,7 @@ class FacebookPost:
                     "enabled": True,
                     "success": False,
                     "clicked": True,
+                    "group_share": group_result,
                     **verification,
                     **evidence,
                 }
@@ -116,6 +135,7 @@ class FacebookPost:
                 "enabled": True,
                 "success": True,
                 "clicked": True,
+                "group_share": group_result,
                 **verification,
                 **evidence,
             }
@@ -310,6 +330,209 @@ class FacebookPost:
 
         file_inputs[-1].send_keys(os.path.abspath(image_path))
         time.sleep(8)
+
+    def _configure_group_sharing(self, driver: webdriver.Firefox) -> dict:
+        if not self.group_config.get("enabled"):
+            return {"attempted": False, "enabled": False}
+
+        group_urls = [
+            str(url).strip()
+            for url in self.group_config.get("group_urls", [])
+            if str(url).strip()
+        ]
+        max_groups = int(self.group_config.get("max_groups_per_post", 1) or 1)
+        group_urls = group_urls[: max(1, max_groups)]
+        if not group_urls:
+            return {"attempted": False, "enabled": True, "reason": "no_group_urls"}
+
+        selected = []
+        try:
+            info(" => Opening Facebook Share to groups settings...")
+            self._click_share_to_groups(driver)
+            time.sleep(3)
+
+            for group_url in group_urls:
+                if self._select_group(driver, group_url):
+                    selected.append(group_url)
+                    time.sleep(1)
+
+            self._return_from_group_picker(driver)
+            return {
+                "attempted": True,
+                "enabled": True,
+                "selected": selected,
+                "success": bool(selected),
+            }
+        except Exception as exc:
+            warning(f"Could not configure Facebook group sharing: {exc}")
+            return {
+                "attempted": True,
+                "enabled": True,
+                "selected": selected,
+                "success": False,
+                "reason": str(exc),
+            }
+
+    def _click_share_to_groups(self, driver: webdriver.Firefox) -> None:
+        element = self._find_dialog_row_by_markers(
+            driver,
+            FACEBOOK_SHARE_GROUP_MARKERS,
+            timeout=20,
+        )
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+        time.sleep(1)
+        driver.execute_script("arguments[0].click();", element)
+
+    def _select_group(self, driver: webdriver.Firefox, group_url: str) -> bool:
+        group_id = self._extract_group_id(group_url)
+        search_terms = [term for term in [group_id, group_url] if term]
+
+        self._try_search_group(driver, search_terms[0] if search_terms else group_url)
+        time.sleep(2)
+
+        clicked = driver.execute_script(
+            """
+            const groupId = arguments[0];
+            const groupUrl = arguments[1].toLowerCase();
+
+            function isVisible(el) {
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle(el);
+                return rect.width > 20 && rect.height > 12 &&
+                    style.display !== 'none' &&
+                    style.visibility !== 'hidden' &&
+                    Number(style.opacity || 1) > 0;
+            }
+
+            function textFor(el) {
+                return [
+                    el.innerText || '',
+                    el.textContent || '',
+                    el.getAttribute('aria-label') || '',
+                    el.getAttribute('href') || ''
+                ].join(' ').toLowerCase();
+            }
+
+            const candidates = Array.from(document.querySelectorAll("div[role='button'], label, a, input[type='checkbox']"))
+                .filter(isVisible)
+                .filter((el) => {
+                    const text = textFor(el);
+                    return (groupId && text.includes(groupId)) || text.includes(groupUrl);
+                });
+
+            let target = candidates[0];
+            if (!target) {
+                const fallback = Array.from(document.querySelectorAll("div[role='button'], label, input[type='checkbox']"))
+                    .filter(isVisible)
+                    .filter((el) => {
+                        const text = textFor(el);
+                        return !text.includes('search') && !text.includes('tìm kiếm');
+                    });
+                target = fallback[0];
+            }
+
+            if (!target) return false;
+            const button = target.closest("div[role='button'], label") || target;
+            button.scrollIntoView({block: 'center'});
+            button.click();
+            return true;
+            """,
+            group_id,
+            group_url,
+        )
+        return bool(clicked)
+
+    def _try_search_group(self, driver: webdriver.Firefox, query: str) -> bool:
+        if not query:
+            return False
+        try:
+            search_box = WebDriverWait(driver, 8).until(
+                lambda current_driver: current_driver.execute_script(
+                    """
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 40 && rect.height > 20 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
+                    const inputs = Array.from(document.querySelectorAll("input[type='text'], input[role='combobox'], input[placeholder], [contenteditable='true']"))
+                        .filter(isVisible)
+                        .filter((el) => {
+                            const text = [
+                                el.getAttribute('aria-label') || '',
+                                el.getAttribute('placeholder') || '',
+                                el.innerText || '',
+                                el.textContent || ''
+                            ].join(' ').toLowerCase();
+                            return text.includes('search') || text.includes('tìm kiếm') || text.includes('nhóm') || text.includes('group');
+                        });
+                    return inputs[0] || null;
+                    """
+                )
+            )
+            search_box.click()
+            modifier_key = Keys.COMMAND if platform.system() == "Darwin" else Keys.CONTROL
+            ActionChains(driver).key_down(modifier_key).send_keys("a").key_up(modifier_key).perform()
+            search_box.send_keys(Keys.BACKSPACE)
+            search_box.send_keys(query)
+            return True
+        except Exception:
+            return False
+
+    def _return_from_group_picker(self, driver: webdriver.Firefox) -> None:
+        if self._try_click_dialog_button_by_markers(driver, ["done", "xong", "save", "lưu"], 5):
+            time.sleep(2)
+            return
+        if self._try_click_dialog_button_by_markers(driver, ["back", "quay lại"], 5):
+            time.sleep(2)
+            return
+
+    def _extract_group_id(self, group_url: str) -> str:
+        match = re.search(r"/groups/([^/?#]+)", group_url)
+        return match.group(1) if match else ""
+
+    def _find_dialog_row_by_markers(
+        self,
+        driver: webdriver.Firefox,
+        markers: list[str],
+        timeout: int,
+    ) -> WebElement:
+        def find(current_driver: webdriver.Firefox):
+            row = current_driver.execute_script(
+                """
+                const markers = arguments[0].map((value) => String(value).toLowerCase());
+                function isVisible(el) {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width > 40 && rect.height > 20 &&
+                        style.display !== 'none' &&
+                        style.visibility !== 'hidden' &&
+                        Number(style.opacity || 1) > 0;
+                }
+                function textFor(el) {
+                    return [
+                        el.innerText || '',
+                        el.textContent || '',
+                        el.getAttribute('aria-label') || '',
+                        el.getAttribute('title') || ''
+                    ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                }
+                const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                    .filter(isVisible);
+                const root = dialogs.length ? dialogs[dialogs.length - 1] : document;
+                const candidates = Array.from(root.querySelectorAll("div[role='button'], button, a[role='button'], span, div"))
+                    .filter(isVisible)
+                    .filter((el) => markers.some((marker) => textFor(el).includes(marker)))
+                    .sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width);
+                return candidates[0] || null;
+                """,
+                markers,
+            )
+            return row or False
+
+        return WebDriverWait(driver, timeout).until(find)
 
     def _find_element_by_markers(
         self,
@@ -576,6 +799,26 @@ class FacebookPost:
             return True
         except Exception as exc:
             warning(f"Could not click optional Facebook {label} button: {exc}")
+            return False
+
+    def _try_click_dialog_button_by_markers(
+        self,
+        driver: webdriver.Firefox,
+        markers: list[str],
+        timeout: int,
+    ) -> bool:
+        try:
+            button = self._find_dialog_button(
+                driver,
+                markers,
+                timeout,
+                allow_primary_fallback=False,
+            )
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+            time.sleep(1)
+            driver.execute_script("arguments[0].click();", button)
+            return True
+        except Exception:
             return False
 
     def _verify_publish_result(self, driver: webdriver.Firefox) -> dict:
