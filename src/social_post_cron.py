@@ -34,6 +34,11 @@ def parse_args() -> argparse.Namespace:
         in {"1", "true", "yes", "on"},
         help="Allow publishing before social_posts.automation_verified=true.",
     )
+    parser.add_argument(
+        "--draft-path",
+        default=os.environ.get("MPV2_SOCIAL_POST_DRAFT_PATH", ""),
+        help="Publish or dry-run an existing reviewed draft JSON instead of generating a new one.",
+    )
     return parser.parse_args()
 
 
@@ -47,6 +52,7 @@ def main() -> int:
             platform=args.platform,
             dry_run=args.dry_run,
             allow_unverified=args.allow_unverified,
+            draft_path=args.draft_path,
         )
     except Exception as exc:
         error(f"Social post job failed: {exc}")

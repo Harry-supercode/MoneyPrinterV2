@@ -20,6 +20,7 @@ class SocialPostPipeline:
         platform: str = "all",
         dry_run: bool = False,
         allow_unverified: bool = False,
+        draft_path: str = "",
     ) -> dict:
         if not self.config.get("enabled"):
             raise RuntimeError("social_posts.enabled is false")
@@ -30,13 +31,13 @@ class SocialPostPipeline:
                 "Run and verify browser automation on the VPS first, then set it true."
             )
 
-        draft = SocialPostGenerator(self.config).generate()
+        draft = self._load_draft(draft_path) if draft_path else SocialPostGenerator(self.config).generate()
         result = {
             "draft": draft,
             "dry_run": dry_run,
             "platforms": {},
         }
-        info(f" => Social post draft saved: {draft['draft_path']}")
+        info(f" => Social post draft ready: {draft.get('draft_path', draft_path)}")
 
         if dry_run:
             self._record_result(result)
@@ -53,6 +54,31 @@ class SocialPostPipeline:
         else:
             warning(" => Social post pipeline completed without successful publishes.")
         return result
+
+    def _load_draft(self, draft_path: str) -> dict:
+        path = Path(draft_path).expanduser()
+        if not path.is_absolute():
+            path = Path(ROOT_DIR) / path
+        if not path.exists():
+            raise FileNotFoundError(f"Social post draft not found: {path}")
+
+        with path.open("r", encoding="utf-8") as file:
+            draft = json.load(file)
+
+        if not isinstance(draft, dict):
+            raise ValueError(f"Social post draft must be a JSON object: {path}")
+
+        text = str(draft.get("text", "")).strip()
+        if not text:
+            raise ValueError(f"Social post draft text is empty: {path}")
+
+        image_path = str(draft.get("image_path", "")).strip()
+        if image_path and not Path(image_path).expanduser().exists():
+            raise FileNotFoundError(f"Social post draft image not found: {image_path}")
+
+        draft["draft_path"] = str(path)
+        draft.setdefault("id", path.stem)
+        return draft
 
     def _target_platforms(self, platform: str) -> list[str]:
         requested = str(platform or "all").strip().lower()
@@ -104,7 +130,7 @@ class SocialPostPipeline:
             {
                 "created_at": datetime.now().isoformat(timespec="seconds"),
                 "draft_id": result["draft"]["id"],
-                "draft_path": result["draft"]["draft_path"],
+                "draft_path": result["draft"].get("draft_path", ""),
                 "dry_run": result["dry_run"],
                 "platforms": result["platforms"],
             }
