@@ -109,9 +109,25 @@ class FacebookPost:
                 self._capture_evidence(driver, "facebook-post-after-next")
             group_result = self._configure_group_sharing(driver)
             if group_result.get("attempted"):
-                self._capture_evidence(driver, "facebook-post-after-group-share")
+                evidence = self._capture_evidence(driver, "facebook-post-after-group-share")
+                if not group_result.get("success"):
+                    warning(
+                        " => Facebook group sharing was not configured; "
+                        "skipping publish to avoid posting without the requested group share."
+                    )
+                    driver.quit()
+                    return {
+                        "enabled": True,
+                        "success": False,
+                        "clicked": False,
+                        "reason": "group_share_failed",
+                        "group_share": group_result,
+                        **evidence,
+                    }
             self._click_publish_button(driver, timeout=60)
-            time.sleep(self.post_wait_seconds)
+            wait_seconds = self._post_publish_wait_seconds(image_path)
+            info(f" => Waiting {wait_seconds}s for Facebook publish/upload to settle...")
+            time.sleep(wait_seconds)
             evidence = self._capture_evidence(driver, "facebook-post-after-click")
             verification = self._verify_publish_result(driver)
             if not verification["success"]:
@@ -154,6 +170,11 @@ class FacebookPost:
                 "reason": "exception",
                 **evidence,
             }
+
+    def _post_publish_wait_seconds(self, image_path: str = "") -> int:
+        if image_path:
+            return max(self.post_wait_seconds, 45)
+        return self.post_wait_seconds
 
     def _assert_firefox_profile_available(self) -> None:
         lock_path = os.path.join(self.fp_profile_path, ".parentlock")
@@ -371,6 +392,7 @@ class FacebookPost:
             }
         except Exception as exc:
             warning(f"Could not configure Facebook group sharing: {exc}")
+            self._return_from_group_picker(driver)
             return {
                 "attempted": True,
                 "enabled": True,
@@ -404,14 +426,91 @@ class FacebookPost:
         return targets
 
     def _click_share_to_groups(self, driver: webdriver.Firefox) -> None:
-        element = self._find_dialog_row_by_markers(
-            driver,
-            FACEBOOK_SHARE_GROUP_MARKERS,
-            timeout=20,
+        clicked = WebDriverWait(driver, 20).until(
+            lambda current_driver: current_driver.execute_script(
+                """
+                const markers = arguments[0].map((value) => String(value).toLowerCase());
+
+                function isVisible(el) {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width > 40 && rect.height > 20 &&
+                        style.display !== 'none' &&
+                        style.visibility !== 'hidden' &&
+                        Number(style.opacity || 1) > 0;
+                }
+
+                function textFor(el) {
+                    return [
+                        el.innerText || '',
+                        el.textContent || '',
+                        el.getAttribute('aria-label') || '',
+                        el.getAttribute('title') || ''
+                    ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                }
+
+                function dispatchClickAt(x, y) {
+                    const target = document.elementFromPoint(x, y);
+                    if (!target) return false;
+                    const button = target.closest("div[role='button'], button, a[role='button']") || target;
+                    button.scrollIntoView({block: 'center'});
+                    for (const eventName of ['mouseover', 'mousedown', 'mouseup', 'click']) {
+                        button.dispatchEvent(new MouseEvent(eventName, {
+                            bubbles: true,
+                            cancelable: true,
+                            view: window,
+                            clientX: x,
+                            clientY: y
+                        }));
+                    }
+                    return true;
+                }
+
+                const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                    .filter(isVisible);
+                const root = dialogs.length ? dialogs[dialogs.length - 1] : document;
+                const matches = Array.from(root.querySelectorAll("div[role='button'], button, a[role='button'], span, div"))
+                    .filter(isVisible)
+                    .filter((el) => markers.some((marker) => textFor(el).includes(marker)))
+                    .map((el) => {
+                        let row = el.closest("div[role='button'], button, a[role='button']");
+                        let probe = el;
+                        for (let depth = 0; depth < 6 && probe; depth += 1) {
+                            const rect = probe.getBoundingClientRect();
+                            const text = textFor(probe);
+                            if (
+                                rect.width > 350 &&
+                                rect.height > 45 &&
+                                markers.some((marker) => text.includes(marker))
+                            ) {
+                                row = probe;
+                                break;
+                            }
+                            probe = probe.parentElement;
+                        }
+                        const rect = (row || el).getBoundingClientRect();
+                        return {el: row || el, rect};
+                    })
+                    .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
+
+                if (!matches.length) return false;
+                const rect = matches[0].rect;
+                const points = [
+                    [rect.right - 28, rect.top + rect.height / 2],
+                    [rect.right - 52, rect.top + rect.height / 2],
+                    [rect.left + rect.width / 2, rect.top + rect.height / 2],
+                ];
+                for (const [x, y] of points) {
+                    if (dispatchClickAt(x, y)) return true;
+                }
+                return false;
+                """,
+                FACEBOOK_SHARE_GROUP_MARKERS,
+            )
         )
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-        time.sleep(1)
-        driver.execute_script("arguments[0].click();", element)
+        if not clicked:
+            raise RuntimeError("Could not click Facebook Share to groups row.")
+        time.sleep(2)
 
     def _select_group(self, driver: webdriver.Firefox, target: dict[str, str]) -> bool:
         group_name = target.get("name", "")
@@ -424,9 +523,18 @@ class FacebookPost:
 
         clicked = driver.execute_script(
             """
-            const groupName = String(arguments[0] || '').toLowerCase();
-            const groupId = String(arguments[1] || '').toLowerCase();
-            const groupUrl = String(arguments[2] || '').toLowerCase();
+            function normalize(value) {
+                return String(value || '')
+                    .normalize('NFD')
+                    .replace(/[\\u0300-\\u036f]/g, '')
+                    .replace(/đ/g, 'd')
+                    .replace(/Đ/g, 'd')
+                    .toLowerCase();
+            }
+
+            const groupName = normalize(arguments[0]);
+            const groupId = normalize(arguments[1]);
+            const groupUrl = normalize(arguments[2]);
             const exactTerms = [groupName, groupId, groupUrl].filter(Boolean);
 
             function isVisible(el) {
@@ -444,13 +552,13 @@ class FacebookPost:
                     el.textContent || '',
                     el.getAttribute('aria-label') || '',
                     el.getAttribute('href') || ''
-                ].join(' ').toLowerCase();
+                ].join(' ');
             }
 
             const candidates = Array.from(document.querySelectorAll("div[role='button'], label, a, input[type='checkbox']"))
                 .filter(isVisible)
                 .filter((el) => {
-                    const text = textFor(el);
+                    const text = normalize(textFor(el));
                     if (!exactTerms.some((term) => text.includes(term))) return false;
                     return !text.includes('search') && !text.includes('tìm kiếm');
                 });
@@ -503,6 +611,23 @@ class FacebookPost:
             ActionChains(driver).key_down(modifier_key).send_keys("a").key_up(modifier_key).perform()
             search_box.send_keys(Keys.BACKSPACE)
             search_box.send_keys(query)
+            driver.execute_script(
+                """
+                const el = arguments[0];
+                const value = arguments[1];
+                el.focus();
+                if (el.isContentEditable) {
+                    el.innerText = value;
+                } else {
+                    el.value = value;
+                }
+                for (const eventName of ['input', 'change', 'keyup']) {
+                    el.dispatchEvent(new Event(eventName, {bubbles: true}));
+                }
+                """,
+                search_box,
+                query,
+            )
             return True
         except Exception:
             return False
