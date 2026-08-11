@@ -207,14 +207,83 @@ class FacebookPost:
 
     def _set_text(self, driver: webdriver.Firefox, editor: WebElement, text: str) -> None:
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", editor)
-        editor.click()
         time.sleep(0.5)
-        modifier_key = Keys.COMMAND if platform.system() == "Darwin" else Keys.CONTROL
-        ActionChains(driver).key_down(modifier_key).send_keys("a").key_up(modifier_key).perform()
-        editor.send_keys(Keys.BACKSPACE)
-        time.sleep(0.3)
-        editor.send_keys(text)
+        self._set_text_with_js(driver, editor, text)
         time.sleep(1)
+        if self._editor_contains_text(driver, editor, text):
+            return
+
+        try:
+            driver.execute_script("arguments[0].click();", editor)
+            modifier_key = Keys.COMMAND if platform.system() == "Darwin" else Keys.CONTROL
+            ActionChains(driver).key_down(modifier_key).send_keys("a").key_up(modifier_key).perform()
+            editor.send_keys(Keys.BACKSPACE)
+            time.sleep(0.3)
+            editor.send_keys(text)
+        except Exception as exc:
+            warning(f"Facebook editor direct click failed; retrying active element input: {exc}")
+            driver.execute_script("arguments[0].focus();", editor)
+            ActionChains(driver).send_keys(text).perform()
+
+        time.sleep(1)
+        if not self._editor_contains_text(driver, editor, text):
+            raise RuntimeError("Facebook editor did not accept the post text.")
+
+    def _set_text_with_js(
+        self,
+        driver: webdriver.Firefox,
+        editor: WebElement,
+        text: str,
+    ) -> None:
+        driver.execute_script(
+            """
+            const el = arguments[0];
+            const value = arguments[1];
+            el.scrollIntoView({block: 'center'});
+            el.focus();
+
+            const selection = window.getSelection();
+            if (selection) {
+                selection.removeAllRanges();
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                selection.addRange(range);
+            }
+
+            document.execCommand('delete', false, null);
+            const inserted = document.execCommand('insertText', false, value);
+            if (!inserted || !(el.innerText || el.textContent || '').includes(value.slice(0, 40))) {
+                if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+                    el.value = value;
+                } else {
+                    el.textContent = value;
+                }
+            }
+
+            el.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: value}));
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+            """,
+            editor,
+            text,
+        )
+
+    def _editor_contains_text(
+        self,
+        driver: webdriver.Firefox,
+        editor: WebElement,
+        text: str,
+    ) -> bool:
+        try:
+            current_text = driver.execute_script(
+                "return (arguments[0].value || arguments[0].innerText || arguments[0].textContent || '').trim();",
+                editor,
+            )
+        except Exception:
+            return False
+
+        expected_prefix = " ".join(str(text).split())[:80]
+        actual = " ".join(str(current_text).split())
+        return bool(expected_prefix and expected_prefix in actual)
 
     def _attach_image(self, driver: webdriver.Firefox, image_path: str) -> None:
         if not os.path.exists(image_path):
