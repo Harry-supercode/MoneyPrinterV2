@@ -46,6 +46,24 @@ class SocialPostPipelineDraftTests(unittest.TestCase):
         self.assertEqual(result["draft"]["text"], "Reviewed text")
         self.assertTrue(result["dry_run"])
 
+    def test_duplicate_skip_is_not_reported_as_publish_success(self) -> None:
+        with patch("classes.SocialPostPipeline.get_social_posts_config") as config:
+            config.return_value = {
+                "enabled": True,
+                "automation_verified": True,
+                "browser_profile": "/tmp/profile",
+                "platforms": {"facebook": {"enabled": True}},
+            }
+            pipeline = SocialPostPipeline()
+            with patch.object(pipeline, "_already_published", return_value=True):
+                result = pipeline._publish_platform(
+                    "facebook",
+                    {"text": "Reviewed text", "image_path": ""},
+                )
+
+        self.assertFalse(result["success"])
+        self.assertTrue(result["skipped_duplicate"])
+
 
 if __name__ == "__main__":
     unittest.main()

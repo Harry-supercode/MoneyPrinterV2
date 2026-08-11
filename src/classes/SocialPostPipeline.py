@@ -99,7 +99,7 @@ class SocialPostPipeline:
         fingerprint = self._fingerprint(platform, draft)
         if self._already_published(fingerprint):
             warning(f" => Skipping duplicate {platform} social post.")
-            return {"enabled": True, "success": True, "skipped_duplicate": True}
+            return {"enabled": True, "success": False, "skipped_duplicate": True}
 
         browser_profile = str(self.config.get("browser_profile", "")).strip()
         if not browser_profile:
@@ -116,11 +116,13 @@ class SocialPostPipeline:
         else:
             raise ValueError(f"Unsupported social post platform: {platform}")
 
-        success_value = publisher.publish(draft["text"], draft.get("image_path", ""))
-        if success_value:
+        publish_result = publisher.publish(draft["text"], draft.get("image_path", ""))
+        if isinstance(publish_result, bool):
+            publish_result = {"enabled": True, "success": publish_result}
+        if publish_result.get("success"):
             self._mark_published(fingerprint)
 
-        return {"enabled": True, "success": success_value}
+        return {"enabled": True, **publish_result}
 
     def _record_result(self, result: dict) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)

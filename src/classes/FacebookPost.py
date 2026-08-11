@@ -3,6 +3,8 @@ import platform
 import subprocess
 import time
 import traceback
+from datetime import datetime
+from pathlib import Path
 
 from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
@@ -14,7 +16,7 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.firefox import GeckoDriverManager
 
-from config import get_firefox_binary_path
+from config import ROOT_DIR, get_firefox_binary_path
 from firefox_profile import apply_firefox_profile
 from status import info, success, warning
 
@@ -65,7 +67,7 @@ class FacebookPost:
         self.service = Service(GeckoDriverManager().install())
         self.browser = webdriver.Firefox(service=self.service, options=self.options)
 
-    def publish(self, text: str, image_path: str = "") -> bool:
+    def publish(self, text: str, image_path: str = "") -> dict:
         driver = self.browser
         try:
             info(" => Opening Facebook post composer...")
@@ -81,17 +83,46 @@ class FacebookPost:
 
             self._click_button(driver, FACEBOOK_POST_BUTTON_MARKERS, "Facebook Post", 60)
             time.sleep(self.post_wait_seconds)
+            evidence = self._capture_evidence(driver, "facebook-post-after-click")
+            verification = self._verify_publish_result(driver)
+            if not verification["success"]:
+                warning(
+                    " => Facebook post click completed but publish could not be verified: "
+                    f"{verification['reason']}"
+                )
+                driver.quit()
+                return {
+                    "enabled": True,
+                    "success": False,
+                    "clicked": True,
+                    **verification,
+                    **evidence,
+                }
+
             success(" => Published Facebook text/image post.")
             driver.quit()
-            return True
+            return {
+                "enabled": True,
+                "success": True,
+                "clicked": True,
+                **verification,
+                **evidence,
+            }
         except Exception:
             traceback.print_exc()
             warning(" => Failed to publish Facebook text/image post.")
+            evidence = self._capture_evidence(driver, "facebook-post-error")
             try:
                 driver.quit()
             except Exception:
                 pass
-            return False
+            return {
+                "enabled": True,
+                "success": False,
+                "clicked": False,
+                "reason": "exception",
+                **evidence,
+            }
 
     def _assert_firefox_profile_available(self) -> None:
         lock_path = os.path.join(self.fp_profile_path, ".parentlock")
@@ -271,3 +302,85 @@ class FacebookPost:
         except Exception as exc:
             warning(f"Could not click optional Facebook {label} button: {exc}")
             return False
+
+    def _verify_publish_result(self, driver: webdriver.Firefox) -> dict:
+        page_text = ""
+        try:
+            page_text = driver.execute_script("return document.body.innerText || '';") or ""
+        except Exception:
+            page_text = ""
+
+        normalized = page_text.lower()
+        error_markers = [
+            "something went wrong",
+            "try again",
+            "couldn't post",
+            "could not post",
+            "we restrict certain activity",
+            "đã xảy ra lỗi",
+            "thử lại",
+            "không thể đăng",
+            "bị hạn chế",
+        ]
+        if any(marker in normalized for marker in error_markers):
+            return {"success": False, "reason": "facebook_error_visible"}
+
+        composer_open = self._composer_is_open(driver)
+        if composer_open:
+            return {"success": False, "reason": "composer_still_open_after_click"}
+
+        return {"success": True, "reason": "composer_closed_no_visible_error"}
+
+    def _composer_is_open(self, driver: webdriver.Firefox) -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 40 && rect.height > 20 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
+                    const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                        .filter(isVisible);
+                    const textboxes = Array.from(document.querySelectorAll(
+                        "div[role='textbox'][contenteditable='true'], [contenteditable='true'], textarea"
+                    )).filter(isVisible);
+                    return dialogs.length > 0 && textboxes.length > 0;
+                    """
+                )
+            )
+        except Exception:
+            return False
+
+    def _capture_evidence(self, driver: webdriver.Firefox, label: str) -> dict:
+        evidence_dir = Path(ROOT_DIR) / "output" / "social_posts" / "evidence"
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        screenshot_path = evidence_dir / f"{timestamp}-{label}.png"
+        html_path = evidence_dir / f"{timestamp}-{label}.html"
+        evidence = {
+            "current_url": "",
+            "screenshot_path": str(screenshot_path),
+            "html_path": str(html_path),
+        }
+
+        try:
+            evidence["current_url"] = driver.current_url
+        except Exception:
+            pass
+
+        try:
+            driver.save_screenshot(str(screenshot_path))
+        except Exception as exc:
+            evidence["screenshot_error"] = str(exc)
+
+        try:
+            html_path.write_text(driver.page_source, encoding="utf-8", errors="replace")
+        except Exception as exc:
+            evidence["html_error"] = str(exc)
+
+        return evidence
