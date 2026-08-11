@@ -426,91 +426,121 @@ class FacebookPost:
         return targets
 
     def _click_share_to_groups(self, driver: webdriver.Firefox) -> None:
-        clicked = WebDriverWait(driver, 20).until(
-            lambda current_driver: current_driver.execute_script(
-                """
-                const markers = arguments[0].map((value) => String(value).toLowerCase());
-
-                function isVisible(el) {
-                    const rect = el.getBoundingClientRect();
-                    const style = window.getComputedStyle(el);
-                    return rect.width > 40 && rect.height > 20 &&
-                        style.display !== 'none' &&
-                        style.visibility !== 'hidden' &&
-                        Number(style.opacity || 1) > 0;
-                }
-
-                function textFor(el) {
-                    return [
-                        el.innerText || '',
-                        el.textContent || '',
-                        el.getAttribute('aria-label') || '',
-                        el.getAttribute('title') || ''
-                    ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
-                }
-
-                function dispatchClickAt(x, y) {
-                    const target = document.elementFromPoint(x, y);
-                    if (!target) return false;
-                    const button = target.closest("div[role='button'], button, a[role='button']") || target;
-                    button.scrollIntoView({block: 'center'});
-                    for (const eventName of ['mouseover', 'mousedown', 'mouseup', 'click']) {
-                        button.dispatchEvent(new MouseEvent(eventName, {
-                            bubbles: true,
-                            cancelable: true,
-                            view: window,
-                            clientX: x,
-                            clientY: y
-                        }));
-                    }
-                    return true;
-                }
-
-                const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
-                    .filter(isVisible);
-                const root = dialogs.length ? dialogs[dialogs.length - 1] : document;
-                const matches = Array.from(root.querySelectorAll("div[role='button'], button, a[role='button'], span, div"))
-                    .filter(isVisible)
-                    .filter((el) => markers.some((marker) => textFor(el).includes(marker)))
-                    .map((el) => {
-                        let row = el.closest("div[role='button'], button, a[role='button']");
-                        let probe = el;
-                        for (let depth = 0; depth < 6 && probe; depth += 1) {
-                            const rect = probe.getBoundingClientRect();
-                            const text = textFor(probe);
-                            if (
-                                rect.width > 350 &&
-                                rect.height > 45 &&
-                                markers.some((marker) => text.includes(marker))
-                            ) {
-                                row = probe;
-                                break;
-                            }
-                            probe = probe.parentElement;
-                        }
-                        const rect = (row || el).getBoundingClientRect();
-                        return {el: row || el, rect};
-                    })
-                    .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
-
-                if (!matches.length) return false;
-                const rect = matches[0].rect;
-                const points = [
-                    [rect.right - 28, rect.top + rect.height / 2],
-                    [rect.right - 52, rect.top + rect.height / 2],
-                    [rect.left + rect.width / 2, rect.top + rect.height / 2],
-                ];
-                for (const [x, y] of points) {
-                    if (dispatchClickAt(x, y)) return true;
-                }
-                return false;
-                """,
-                FACEBOOK_SHARE_GROUP_MARKERS,
-            )
+        row = self._find_dialog_row_by_markers(
+            driver,
+            FACEBOOK_SHARE_GROUP_MARKERS,
+            timeout=20,
         )
-        if not clicked:
-            raise RuntimeError("Could not click Facebook Share to groups row.")
-        time.sleep(2)
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", row)
+        time.sleep(1)
+
+        for attempt in range(3):
+            if attempt == 0:
+                try:
+                    ActionChains(driver).move_to_element(row).click().perform()
+                except Exception:
+                    pass
+            elif attempt == 1:
+                try:
+                    ActionChains(driver).move_to_element_with_offset(row, 260, 0).click().perform()
+                except Exception:
+                    pass
+            else:
+                self._click_element_right_edge(driver, row)
+
+            time.sleep(2)
+            if self._group_picker_is_open(driver):
+                return
+
+        raise RuntimeError("Could not open Facebook Share to groups picker.")
+
+    def _click_element_right_edge(
+        self,
+        driver: webdriver.Firefox,
+        element: WebElement,
+    ) -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    const el = arguments[0];
+                    el.scrollIntoView({block: 'center'});
+                    const rect = el.getBoundingClientRect();
+
+                    function dispatchClickAt(x, y) {
+                        const target = document.elementFromPoint(x, y);
+                        if (!target) return false;
+                        const button = target.closest("div[role='button'], button, a[role='button']") || target;
+                        for (const eventName of ['mouseover', 'mousedown', 'mouseup', 'click']) {
+                            button.dispatchEvent(new MouseEvent(eventName, {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: x,
+                                clientY: y
+                            }));
+                        }
+                        return true;
+                    }
+
+                    const y = rect.top + rect.height / 2;
+                    const points = [
+                        [rect.right - 28, y],
+                        [rect.right - 52, y],
+                        [rect.left + rect.width / 2, y],
+                    ];
+                    return points.some(([x, y]) => dispatchClickAt(x, y));
+                    """,
+                    element,
+                )
+            )
+        except Exception:
+            return False
+
+    def _group_picker_is_open(self, driver: webdriver.Firefox) -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 40 && rect.height > 20 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
+                    function textFor(el) {
+                        return [
+                            el.innerText || '',
+                            el.textContent || '',
+                            el.getAttribute('aria-label') || '',
+                            el.getAttribute('placeholder') || ''
+                        ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                    }
+                    const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                        .filter(isVisible);
+                    const root = dialogs.length ? dialogs[dialogs.length - 1] : document;
+                    const rootText = textFor(root);
+                    const hasSearchInput = Array.from(root.querySelectorAll("input[type='text'], input[role='combobox'], input[placeholder], [contenteditable='true']"))
+                        .filter(isVisible)
+                        .some((el) => {
+                            const text = textFor(el);
+                            return text.includes('search') ||
+                                text.includes('tìm kiếm') ||
+                                text.includes('nhóm') ||
+                                text.includes('group');
+                        });
+                    return hasSearchInput &&
+                        (rootText.includes('chia sẻ lên nhóm') ||
+                            rootText.includes('share to groups') ||
+                            rootText.includes('groups') ||
+                            rootText.includes('nhóm'));
+                    """
+                )
+            )
+        except Exception:
+            return False
 
     def _select_group(self, driver: webdriver.Firefox, target: dict[str, str]) -> bool:
         group_name = target.get("name", "")
@@ -676,8 +706,32 @@ class FacebookPost:
                 const candidates = Array.from(root.querySelectorAll("div[role='button'], button, a[role='button'], span, div"))
                     .filter(isVisible)
                     .filter((el) => markers.some((marker) => textFor(el).includes(marker)))
-                    .sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width);
-                return candidates[0] || null;
+                    .map((el) => {
+                        let best = el.closest("div[role='button'], button, a[role='button']") || el;
+                        let probe = el;
+                        for (let depth = 0; depth < 8 && probe; depth += 1) {
+                            const rect = probe.getBoundingClientRect();
+                            const text = textFor(probe);
+                            if (
+                                rect.width >= 300 &&
+                                rect.height >= 45 &&
+                                rect.height <= 160 &&
+                                markers.some((marker) => text.includes(marker))
+                            ) {
+                                best = probe;
+                            }
+                            probe = probe.parentElement;
+                        }
+                        const rect = best.getBoundingClientRect();
+                        return {el: best, rect};
+                    })
+                    .filter((item) => item.rect.width >= 300 && item.rect.height >= 45)
+                    .sort((a, b) => {
+                        const areaA = a.rect.width * a.rect.height;
+                        const areaB = b.rect.width * b.rect.height;
+                        return areaB - areaA;
+                    });
+                return candidates[0]?.el || null;
                 """,
                 markers,
             )
