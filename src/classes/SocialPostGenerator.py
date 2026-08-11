@@ -70,11 +70,13 @@ class SocialPostGenerator:
             f"Topic: {topic}\n"
             f"Tone: {tone}\n"
             "Rules:\n"
+            "- If the language is Vietnamese, write only Vietnamese with common English brand/product names.\n"
             "- 2 to 5 short paragraphs.\n"
             "- No markdown headings.\n"
             "- No fake metrics, guarantees, or unsupported claims.\n"
             "- Avoid clickbait.\n"
             "- Do not write hashtags. A fixed footer will be appended separately.\n"
+            "- Do not write a footer, contact block, links, or social channel list.\n"
             f"- Maximum {max_chars} characters.\n"
             "- Write only the main post body."
         )
@@ -95,12 +97,40 @@ class SocialPostGenerator:
     def _clean_text(self, text: str, max_chars: int) -> str:
         cleaned = str(text).replace("```", "").strip().strip('"')
         cleaned = "\n".join(line.rstrip() for line in cleaned.splitlines()).strip()
+        cleaned = self._strip_generated_footer_lines(cleaned)
+        cleaned = self._strip_disallowed_scripts(cleaned)
         cleaned = self._strip_body_hashtags(cleaned)
         if len(cleaned) <= max_chars:
             return cleaned
 
         truncated = cleaned[: max_chars - 3].rsplit(" ", 1)[0].strip()
         return f"{truncated}..."
+
+    def _strip_generated_footer_lines(self, text: str) -> str:
+        blocked_prefixes = (
+            "footer:",
+            "liên hệ:",
+            "contact:",
+            "website:",
+            "facebook:",
+            "tiktok:",
+            "youtube:",
+            "email:",
+        )
+        lines = []
+        for line in str(text).splitlines():
+            normalized = line.strip().lower()
+            if any(normalized.startswith(prefix) for prefix in blocked_prefixes):
+                continue
+            lines.append(line)
+
+        return "\n".join(lines).strip()
+
+    def _strip_disallowed_scripts(self, text: str) -> str:
+        # Strip unexpected Thai/Lao/Khmer/Myanmar script fragments that local LLMs
+        # sometimes mix into Vietnamese words.
+        cleaned = re.sub(r"[\u0E00-\u0E7F\u0E80-\u0EFF\u1780-\u17FF\u1000-\u109F]+", "", text)
+        return cleaned
 
     def _strip_body_hashtags(self, text: str) -> str:
         lines = []

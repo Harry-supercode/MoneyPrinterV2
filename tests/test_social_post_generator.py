@@ -71,6 +71,33 @@ class SocialPostGeneratorTests(unittest.TestCase):
         self.assertNotIn("#AnotherBadTag", text)
         self.assertTrue(text.endswith("#Hiemee #HieFundi"))
 
+    def test_strips_generated_footer_and_unexpected_script_fragments(self) -> None:
+        generator = SocialPostGenerator(
+            {
+                "output_root": "output/social_posts",
+                "language": "Vietnamese",
+                "brand_name": "HIEMEE",
+                "tone": "concise",
+                "max_chars": 500,
+                "post_footer": "#Hiemee",
+            }
+        )
+
+        with patch(
+            "classes.SocialPostGenerator.generate_text",
+            return_value=(
+                "Hãy phát triểnธุรกิจ với hệ sinh thái HIEMEE.\n\n"
+                "Footer: Liên hệ với chúng tôi để biết thêm.\n"
+                "Dòng lỗi ธุรกิจ cần bị loại bỏ."
+            ),
+        ):
+            text = generator._generate_text("HIEMEE")
+
+        self.assertNotIn("Footer:", text)
+        self.assertNotIn("ธุรกิจ", text)
+        self.assertIn("phát triển", text)
+        self.assertTrue(text.endswith("#Hiemee"))
+
 
 if __name__ == "__main__":
     unittest.main()
