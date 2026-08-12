@@ -30,7 +30,7 @@ Both platform classes use Selenium with a configured Firefox profile. They do no
 
 Facebook opens `platforms.facebook.create_url`, activates a post composer, sets text, optionally attaches an image, then clicks Post/Publish.
 
-YouTube opens `platforms.youtube.create_url`, finds a Community/Post composer, sets text, optionally attaches an image, then clicks Post/Publish.
+YouTube opens `platforms.youtube.create_url`, finds a Community/Post composer, sets text, optionally attaches an image, then clicks Post/Publish. To reuse the same content after a Facebook run, pass the Facebook draft JSON path back into `src/social_post_cron.py` with `--platform youtube --draft-path <path>`.
 
 The YouTube implementation intentionally relies on generic selectors because YouTube Community UI changes. It must be verified manually on the VPS before scheduler publishing is enabled.
 

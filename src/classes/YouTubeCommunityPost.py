@@ -3,6 +3,8 @@ import platform
 import subprocess
 import time
 import traceback
+from datetime import datetime
+from pathlib import Path
 
 from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
@@ -14,7 +16,7 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.firefox import GeckoDriverManager
 
-from config import get_firefox_binary_path
+from config import ROOT_DIR, get_firefox_binary_path
 from firefox_profile import apply_firefox_profile
 from status import info, success, warning
 
@@ -66,7 +68,7 @@ class YouTubeCommunityPost:
         self.service = Service(GeckoDriverManager().install())
         self.browser = webdriver.Firefox(service=self.service, options=self.options)
 
-    def publish(self, text: str, image_path: str = "") -> bool:
+    def publish(self, text: str, image_path: str = "") -> dict:
         driver = self.browser
         try:
             info(" => Opening YouTube Community post composer...")
@@ -80,19 +82,105 @@ class YouTubeCommunityPost:
             if image_path:
                 self._attach_image(driver, image_path)
 
-            self._click_button(driver, YOUTUBE_PUBLISH_MARKERS, "YouTube Community Post", 60)
-            time.sleep(self.post_wait_seconds)
+            self._capture_evidence(driver, "youtube-community-before-click")
+            self._click_publish_button(driver, timeout=60)
+            wait_seconds = self._post_publish_wait_seconds(image_path)
+            info(f" => Waiting {wait_seconds}s for YouTube Community post to settle...")
+            time.sleep(wait_seconds)
+            evidence = self._capture_evidence(driver, "youtube-community-after-click")
+            verification = self._verify_publish_result(driver)
+            if not verification["success"]:
+                warning(
+                    " => YouTube Community post click completed but publish could not be verified: "
+                    f"{verification['reason']}"
+                )
+                if self._hold_browser_open_if_requested(
+                    driver,
+                    f"YouTube Community publish verification failed: {verification['reason']}",
+                ):
+                    return {
+                        "enabled": True,
+                        "success": False,
+                        "clicked": True,
+                        "browser_left_open": True,
+                        **verification,
+                        **evidence,
+                    }
+                driver.quit()
+                return {
+                    "enabled": True,
+                    "success": False,
+                    "clicked": True,
+                    **verification,
+                    **evidence,
+                }
+
             success(" => Published YouTube Community post.")
             driver.quit()
-            return True
+            return {
+                "enabled": True,
+                "success": True,
+                "clicked": True,
+                **verification,
+                **evidence,
+            }
         except Exception:
             traceback.print_exc()
             warning(" => Failed to publish YouTube Community post.")
+            evidence = self._capture_evidence(driver, "youtube-community-error")
+            if self._hold_browser_open_if_requested(driver, "YouTube Community publish exception"):
+                return {
+                    "enabled": True,
+                    "success": False,
+                    "clicked": False,
+                    "reason": "exception",
+                    "browser_left_open": True,
+                    **evidence,
+                }
             try:
                 driver.quit()
             except Exception:
                 pass
+            return {
+                "enabled": True,
+                "success": False,
+                "clicked": False,
+                "reason": "exception",
+                **evidence,
+            }
+
+    def _post_publish_wait_seconds(self, image_path: str = "") -> int:
+        configured_hold = self._env_int("MPV2_YOUTUBE_COMMUNITY_POST_HOLD_SECONDS", 0)
+        if image_path:
+            return max(self.post_wait_seconds, 60, configured_hold)
+        return max(self.post_wait_seconds, 30, configured_hold)
+
+    def _hold_browser_open_if_requested(
+        self,
+        driver: webdriver.Firefox,
+        reason: str,
+    ) -> bool:
+        hold_seconds = self._env_int("MPV2_YOUTUBE_COMMUNITY_KEEP_BROWSER_OPEN_SECONDS", 0)
+        if hold_seconds <= 0:
             return False
+
+        hold_seconds = min(hold_seconds, 3600)
+        warning(
+            f" => Keeping Firefox open for {hold_seconds}s after {reason}. "
+            "Do not close the VNC/browser while YouTube finishes the post."
+        )
+        try:
+            self._capture_evidence(driver, "youtube-community-browser-left-open")
+        except Exception:
+            pass
+        time.sleep(hold_seconds)
+        return True
+
+    def _env_int(self, name: str, default: int) -> int:
+        try:
+            return int(os.environ.get(name, default))
+        except (TypeError, ValueError):
+            return default
 
     def _assert_firefox_profile_available(self) -> None:
         lock_path = os.path.join(self.fp_profile_path, ".parentlock")
@@ -205,6 +293,18 @@ class YouTubeCommunityPost:
         time.sleep(1)
         driver.execute_script("arguments[0].click();", button)
 
+    def _click_publish_button(self, driver: webdriver.Firefox, timeout: int = 60) -> None:
+        button = self._find_button(driver, YOUTUBE_PUBLISH_MARKERS, timeout, prefer_bottom=True)
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+        time.sleep(1)
+        for attempt in range(3):
+            driver.execute_script("arguments[0].click();", button)
+            time.sleep(3)
+            if not self._composer_is_open(driver):
+                return
+            if attempt < 2:
+                button = self._find_button(driver, YOUTUBE_PUBLISH_MARKERS, 15, prefer_bottom=True)
+
     def _try_click_button(
         self,
         driver: webdriver.Firefox,
@@ -224,11 +324,13 @@ class YouTubeCommunityPost:
         driver: webdriver.Firefox,
         markers: list[str],
         timeout: int,
+        prefer_bottom: bool = False,
     ) -> WebElement:
         def find(current_driver: webdriver.Firefox):
             button = current_driver.execute_script(
                 """
                 const markers = arguments[0].map((value) => String(value).toLowerCase());
+                const preferBottom = Boolean(arguments[1]);
                 function textFor(el) {
                     return [
                         el.innerText || '',
@@ -245,15 +347,116 @@ class YouTubeCommunityPost:
                         style.visibility !== 'hidden' &&
                         Number(style.opacity || 1) > 0;
                 }
+                function isEnabled(el) {
+                    const style = window.getComputedStyle(el);
+                    return !el.disabled &&
+                        el.getAttribute('disabled') === null &&
+                        el.getAttribute('aria-disabled') !== 'true' &&
+                        !String(el.getAttribute('class') || '').toLowerCase().includes('disabled') &&
+                        style.pointerEvents !== 'none';
+                }
                 const candidates = Array.from(document.querySelectorAll(
                     "button, tp-yt-paper-button, ytcp-button, div[role='button'], a[role='button']"
                 ))
                     .filter(isVisible)
-                    .filter((el) => markers.some((marker) => textFor(el).includes(marker)));
-                return candidates.length ? candidates[candidates.length - 1] : null;
+                    .filter(isEnabled)
+                    .map((el) => {
+                        const text = textFor(el);
+                        const rect = el.getBoundingClientRect();
+                        let score = 0;
+                        if (markers.some((marker) => text.includes(marker))) score += 300;
+                        if (text === 'post' || text === 'đăng') score += 600;
+                        if (text === 'publish' || text === 'xuất bản') score += 500;
+                        if (text.includes('schedule') || text.includes('lên lịch')) score -= 250;
+                        if (preferBottom) score += Math.round(rect.top / 6);
+                        return {el, text, score};
+                    })
+                    .filter((item) => item.score >= 300)
+                    .sort((a, b) => b.score - a.score);
+                return candidates.length ? candidates[0].el : null;
                 """,
                 markers,
+                prefer_bottom,
             )
             return button or False
 
         return WebDriverWait(driver, timeout).until(find)
+
+    def _verify_publish_result(self, driver: webdriver.Firefox) -> dict:
+        page_text = ""
+        try:
+            page_text = driver.execute_script("return document.body.innerText || '';") or ""
+        except Exception:
+            page_text = ""
+
+        normalized = page_text.lower()
+        error_markers = [
+            "something went wrong",
+            "try again",
+            "couldn't create post",
+            "could not create post",
+            "couldn't post",
+            "could not post",
+            "đã xảy ra lỗi",
+            "thử lại",
+            "không thể đăng",
+        ]
+        if any(marker in normalized for marker in error_markers):
+            return {"success": False, "reason": "youtube_error_visible"}
+
+        if self._composer_is_open(driver):
+            return {"success": False, "reason": "composer_still_open_after_click"}
+
+        return {"success": True, "reason": "composer_closed_no_visible_error"}
+
+    def _composer_is_open(self, driver: webdriver.Firefox) -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 40 && rect.height > 20 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
+                    const editors = Array.from(document.querySelectorAll(
+                        "textarea, ytcp-social-suggestions-textbox, [contenteditable='true'], div[role='textbox']"
+                    )).filter(isVisible);
+                    return editors.length > 0;
+                    """
+                )
+            )
+        except Exception:
+            return False
+
+    def _capture_evidence(self, driver: webdriver.Firefox, label: str) -> dict:
+        evidence_dir = Path(ROOT_DIR) / "output" / "social_posts" / "evidence"
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        screenshot_path = evidence_dir / f"{timestamp}-{label}.png"
+        html_path = evidence_dir / f"{timestamp}-{label}.html"
+        evidence = {
+            "current_url": "",
+            "screenshot_path": str(screenshot_path),
+            "html_path": str(html_path),
+        }
+
+        try:
+            evidence["current_url"] = driver.current_url
+        except Exception:
+            pass
+
+        try:
+            driver.save_screenshot(str(screenshot_path))
+        except Exception:
+            pass
+
+        try:
+            html_path.write_text(driver.page_source, encoding="utf-8")
+        except Exception:
+            pass
+
+        return evidence
