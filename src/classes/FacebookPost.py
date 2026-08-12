@@ -173,8 +173,8 @@ class FacebookPost:
 
     def _post_publish_wait_seconds(self, image_path: str = "") -> int:
         if image_path:
-            return max(self.post_wait_seconds, 45)
-        return self.post_wait_seconds
+            return max(self.post_wait_seconds, 120)
+        return max(self.post_wait_seconds, 45)
 
     def _assert_firefox_profile_available(self) -> None:
         lock_path = os.path.join(self.fp_profile_path, ".parentlock")
@@ -599,11 +599,17 @@ class FacebookPost:
                                 text.includes('nhóm') ||
                                 text.includes('group');
                         });
-                    return hasSearchInput &&
-                        (rootText.includes('chia sẻ lên nhóm') ||
-                            rootText.includes('share to groups') ||
-                            rootText.includes('groups') ||
-                            rootText.includes('nhóm'));
+                    const hasPickerText =
+                        rootText.includes('chia sẻ lên nhóm') ||
+                        rootText.includes('share to groups') ||
+                        rootText.includes('chọn nhóm') ||
+                        rootText.includes('select groups');
+                    const hasDoneButton =
+                        rootText.includes('xong') ||
+                        rootText.includes('done') ||
+                        rootText.includes('lưu') ||
+                        rootText.includes('save');
+                    return hasPickerText && (hasSearchInput || hasDoneButton);
                     """
                 )
             )
@@ -649,8 +655,38 @@ class FacebookPost:
                     el.innerText || '',
                     el.textContent || '',
                     el.getAttribute('aria-label') || '',
+                    el.getAttribute('aria-checked') || '',
+                    el.getAttribute('aria-label') || '',
                     el.getAttribute('href') || ''
                 ].join(' ');
+            }
+
+            function rowFor(el) {
+                let row = el.closest("div[role='button'], label") || el;
+                let probe = el;
+                for (let depth = 0; depth < 8 && probe; depth += 1) {
+                    const rect = probe.getBoundingClientRect();
+                    const text = normalize(textFor(probe));
+                    if (
+                        rect.width > 300 &&
+                        rect.height > 40 &&
+                        rect.height < 140 &&
+                        exactTerms.some((term) => text.includes(term))
+                    ) {
+                        row = probe;
+                    }
+                    probe = probe.parentElement;
+                }
+                return row;
+            }
+
+            function isSelected(el) {
+                const selected = Array.from(el.querySelectorAll("[aria-checked='true'], input[type='checkbox']:checked"))
+                    .some(isVisible);
+                return selected ||
+                    el.getAttribute('aria-checked') === 'true' ||
+                    normalize(textFor(el)).includes('selected') ||
+                    normalize(textFor(el)).includes('da chon');
             }
 
             const candidates = Array.from(document.querySelectorAll("div[role='button'], label, a, input[type='checkbox']"))
@@ -663,8 +699,9 @@ class FacebookPost:
 
             let target = candidates[0];
             if (!target) return false;
-            const button = target.closest("div[role='button'], label") || target;
+            const button = rowFor(target);
             button.scrollIntoView({block: 'center'});
+            if (isSelected(button)) return true;
             button.click();
             return true;
             """,
