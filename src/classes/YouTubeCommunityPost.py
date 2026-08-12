@@ -84,12 +84,12 @@ class YouTubeCommunityPost:
                 self._attach_image(driver, image_path)
 
             self._capture_evidence(driver, "youtube-community-before-click")
-            self._click_publish_button(driver, timeout=60)
+            self._click_publish_button(driver, text, timeout=60)
             wait_seconds = self._post_publish_wait_seconds(image_path)
             info(f" => Waiting {wait_seconds}s for YouTube Community post to settle...")
             time.sleep(wait_seconds)
             evidence = self._capture_evidence(driver, "youtube-community-after-click")
-            verification = self._verify_publish_result(driver)
+            verification = self._verify_publish_result(driver, text)
             if not verification["success"]:
                 warning(
                     " => YouTube Community post click completed but publish could not be verified: "
@@ -530,17 +530,152 @@ class YouTubeCommunityPost:
         time.sleep(1)
         driver.execute_script("arguments[0].click();", button)
 
-    def _click_publish_button(self, driver: webdriver.Firefox, timeout: int = 60) -> None:
-        button = self._find_button(driver, YOUTUBE_PUBLISH_MARKERS, timeout, prefer_bottom=True)
+    def _click_publish_button(
+        self,
+        driver: webdriver.Firefox,
+        text: str,
+        timeout: int = 60,
+    ) -> None:
+        deadline = time.time() + timeout
+        last_clicked = False
+        while time.time() < deadline:
+            if self._click_publish_button_in_composer(driver, text):
+                last_clicked = True
+                time.sleep(4)
+                if not self._composer_is_open(driver, text):
+                    return
+            else:
+                time.sleep(1)
+
+        if last_clicked:
+            return
+
+        button = self._find_button(driver, YOUTUBE_PUBLISH_MARKERS, 10, prefer_bottom=True)
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
         time.sleep(1)
-        for attempt in range(3):
-            driver.execute_script("arguments[0].click();", button)
-            time.sleep(3)
-            if not self._composer_is_open(driver):
-                return
-            if attempt < 2:
-                button = self._find_button(driver, YOUTUBE_PUBLISH_MARKERS, 15, prefer_bottom=True)
+        driver.execute_script("arguments[0].click();", button)
+
+    def _click_publish_button_in_composer(
+        self,
+        driver: webdriver.Firefox,
+        text: str,
+    ) -> bool:
+        sample = text.strip()[:80]
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    const sample = String(arguments[0] || '').toLowerCase();
+
+                    function textFor(el) {
+                        return [
+                            el.innerText || '',
+                            el.textContent || '',
+                            el.getAttribute('aria-label') || '',
+                            el.getAttribute('title') || ''
+                        ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                    }
+
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 20 && rect.height > 12 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
+
+                    function isEnabled(el) {
+                        const style = window.getComputedStyle(el);
+                        const className = String(el.getAttribute('class') || '').toLowerCase();
+                        return !el.disabled &&
+                            el.getAttribute('disabled') === null &&
+                            el.getAttribute('aria-disabled') !== 'true' &&
+                            !className.includes('disabled') &&
+                            !className.includes('disable') &&
+                            style.pointerEvents !== 'none';
+                    }
+
+                    function clickElement(el) {
+                        const rect = el.getBoundingClientRect();
+                        const x = rect.left + rect.width / 2;
+                        const y = rect.top + rect.height / 2;
+                        el.scrollIntoView({block: 'center'});
+                        for (const eventName of ['mouseover', 'mousedown', 'mouseup', 'click']) {
+                            el.dispatchEvent(new MouseEvent(eventName, {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: x,
+                                clientY: y
+                            }));
+                        }
+                        try { el.click(); } catch (error) {}
+                        return true;
+                    }
+
+                    function buttonScore(el, rootRect) {
+                        const text = textFor(el);
+                        const rect = el.getBoundingClientRect();
+                        let score = 0;
+                        if (text === 'đăng' || text === 'post') score += 1000;
+                        if (text === 'xuất bản' || text === 'publish') score += 700;
+                        if (text.includes('đăng') || text.includes('post')) score += 400;
+                        if (text.includes('xuất bản') || text.includes('publish')) score += 300;
+                        if (text.includes('bài đăng của tôi') || text.includes('my posts')) score -= 900;
+                        if (text.includes('tạo') || text.includes('create')) score -= 400;
+                        if (text.includes('lên lịch') || text.includes('schedule')) score -= 250;
+                        score += Math.round((rect.left - rootRect.left) / 8);
+                        score += Math.round((rect.top - rootRect.top) / 8);
+                        return score;
+                    }
+
+                    const rootSelectors = [
+                        'ytd-backstage-post-renderer',
+                        'ytd-backstage-post-thread-renderer',
+                        'ytd-backstage-post-dialog-renderer',
+                        'tp-yt-paper-dialog',
+                        'yt-dialog',
+                        '[role="dialog"]',
+                        'form',
+                        'div'
+                    ];
+                    const roots = Array.from(document.querySelectorAll(rootSelectors.join(',')))
+                        .filter(isVisible)
+                        .map((el) => {
+                            const rect = el.getBoundingClientRect();
+                            const text = textFor(el);
+                            const area = rect.width * rect.height;
+                            return {el, rect, text, area};
+                        })
+                        .filter((item) =>
+                            item.area > 10000 &&
+                            item.area < 900000 &&
+                            sample &&
+                            item.text.includes(sample)
+                        )
+                        .sort((a, b) => a.area - b.area);
+
+                    for (const root of roots) {
+                        const buttons = Array.from(root.el.querySelectorAll(
+                            'button, tp-yt-paper-button, ytcp-button, yt-button-shape button, div[role="button"], a[role="button"]'
+                        ))
+                            .filter(isVisible)
+                            .filter(isEnabled)
+                            .map((el) => ({el, score: buttonScore(el, root.rect)}))
+                            .filter((item) => item.score >= 400)
+                            .sort((a, b) => b.score - a.score);
+
+                        if (buttons.length) return clickElement(buttons[0].el);
+                    }
+
+                    return false;
+                    """,
+                    sample,
+                )
+            )
+        except Exception:
+            return False
 
     def _try_click_button(
         self,
@@ -619,7 +754,7 @@ class YouTubeCommunityPost:
 
         return WebDriverWait(driver, timeout).until(find)
 
-    def _verify_publish_result(self, driver: webdriver.Firefox) -> dict:
+    def _verify_publish_result(self, driver: webdriver.Firefox, text: str = "") -> dict:
         page_text = ""
         try:
             page_text = driver.execute_script("return document.body.innerText || '';") or ""
@@ -641,16 +776,17 @@ class YouTubeCommunityPost:
         if any(marker in normalized for marker in error_markers):
             return {"success": False, "reason": "youtube_error_visible"}
 
-        if self._composer_is_open(driver):
+        if self._composer_is_open(driver, text):
             return {"success": False, "reason": "composer_still_open_after_click"}
 
         return {"success": True, "reason": "composer_closed_no_visible_error"}
 
-    def _composer_is_open(self, driver: webdriver.Firefox) -> bool:
+    def _composer_is_open(self, driver: webdriver.Firefox, text: str = "") -> bool:
         try:
             return bool(
                 driver.execute_script(
                     """
+                    const sample = String(arguments[0] || '').toLowerCase();
                     function isVisible(el) {
                         const rect = el.getBoundingClientRect();
                         const style = window.getComputedStyle(el);
@@ -659,11 +795,36 @@ class YouTubeCommunityPost:
                             style.visibility !== 'hidden' &&
                             Number(style.opacity || 1) > 0;
                     }
-                    const editors = Array.from(document.querySelectorAll(
+                    function textFor(el) {
+                        return [
+                            el.innerText || '',
+                            el.textContent || '',
+                            el.getAttribute('aria-label') || '',
+                            el.getAttribute('placeholder') || ''
+                        ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                    }
+                    if (!sample) {
+                        const editors = Array.from(document.querySelectorAll(
+                            "textarea, ytcp-social-suggestions-textbox, [contenteditable='true'], div[role='textbox']"
+                        )).filter(isVisible);
+                        return editors.length > 0;
+                    }
+                    const roots = Array.from(document.querySelectorAll(
+                        "ytd-backstage-post-renderer, ytd-backstage-post-dialog-renderer, tp-yt-paper-dialog, yt-dialog, [role='dialog'], form, div"
+                    ))
+                        .filter(isVisible)
+                        .filter((el) => {
+                            const rect = el.getBoundingClientRect();
+                            const area = rect.width * rect.height;
+                            return area > 10000 &&
+                                area < 900000 &&
+                                textFor(el).includes(sample);
+                        });
+                    return roots.some((root) => Array.from(root.querySelectorAll(
                         "textarea, ytcp-social-suggestions-textbox, [contenteditable='true'], div[role='textbox']"
-                    )).filter(isVisible);
-                    return editors.length > 0;
-                    """
+                    )).some(isVisible));
+                    """,
+                    text.strip()[:80],
                 )
             )
         except Exception:
