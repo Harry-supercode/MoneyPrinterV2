@@ -663,20 +663,80 @@ class FacebookPost:
 
         for attempt in range(3):
             if attempt == 0:
-                self._native_click_row_right_edge(driver, row)
+                self._click_group_row_checkbox(driver, row)
             elif attempt == 1:
-                self._click_element_right_edge(driver, row)
+                self._native_click_row_right_edge(driver, row)
             else:
-                try:
-                    ActionChains(driver).move_to_element(row).click().perform()
-                except Exception:
-                    pass
+                self._click_element_right_edge(driver, row)
 
             time.sleep(1)
             if self._target_group_is_selected(driver, target):
                 return True
 
         return False
+
+    def _click_group_row_checkbox(
+        self,
+        driver: webdriver.Firefox,
+        row: WebElement,
+    ) -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    const row = arguments[0];
+                    row.scrollIntoView({block: 'center'});
+
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 10 && rect.height > 10 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
+
+                    function dispatchClick(el) {
+                        const rect = el.getBoundingClientRect();
+                        const x = rect.left + rect.width / 2;
+                        const y = rect.top + rect.height / 2;
+                        for (const eventName of ['mouseover', 'mousedown', 'mouseup', 'click']) {
+                            el.dispatchEvent(new MouseEvent(eventName, {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: x,
+                                clientY: y
+                            }));
+                        }
+                        return true;
+                    }
+
+                    const rowRect = row.getBoundingClientRect();
+                    const controls = Array.from(row.querySelectorAll("[aria-checked], input[type='checkbox'], div[role='checkbox']"))
+                        .filter(isVisible)
+                        .map((el) => ({el, rect: el.getBoundingClientRect()}))
+                        .sort((a, b) => b.rect.left - a.rect.left);
+                    if (controls.length) return dispatchClick(controls[0].el);
+
+                    const points = [
+                        [rowRect.right - 24, rowRect.top + rowRect.height / 2],
+                        [rowRect.right - 42, rowRect.top + rowRect.height / 2],
+                        [rowRect.right - 60, rowRect.top + rowRect.height / 2],
+                    ];
+                    for (const [x, y] of points) {
+                        const target = document.elementFromPoint(x, y);
+                        if (!target) continue;
+                        const clickable = target.closest("[aria-checked], input[type='checkbox'], div[role='checkbox'], div[role='button'], label") || target;
+                        if (dispatchClick(clickable)) return true;
+                    }
+                    return false;
+                    """,
+                    row,
+                )
+            )
+        except Exception:
+            return False
 
     def _native_click_row_right_edge(
         self,
@@ -749,10 +809,11 @@ class FacebookPost:
                         if (
                             rect.width > 300 &&
                             rect.height > 40 &&
-                            rect.height < 180 &&
+                            rect.height <= 110 &&
                             terms.some((term) => text.includes(term))
                         ) {
                             row = probe;
+                            break;
                         }
                         probe = probe.parentElement;
                     }
@@ -769,13 +830,19 @@ class FacebookPost:
                     })
                     .map(rowFor)
                     .filter(isVisible)
+                    .map((el) => {
+                        const rect = el.getBoundingClientRect();
+                        const hasControl = Array.from(el.querySelectorAll("[aria-checked], input[type='checkbox'], div[role='checkbox']"))
+                            .some(isVisible);
+                        return {el, rect, hasControl};
+                    })
+                    .filter((item) => item.rect.width > 300 && item.rect.height > 40 && item.rect.height <= 130)
                     .sort((a, b) => {
-                        const ar = a.getBoundingClientRect();
-                        const br = b.getBoundingClientRect();
-                        return (br.width * br.height) - (ar.width * ar.height);
+                        if (a.hasControl !== b.hasControl) return a.hasControl ? -1 : 1;
+                        return a.rect.height - b.rect.height;
                     });
 
-                return candidates[0] || null;
+                return candidates[0]?.el || null;
                 """,
                 target.get("name", ""),
                 target.get("id", ""),
