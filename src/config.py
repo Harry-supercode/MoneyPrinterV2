@@ -938,7 +938,7 @@ def get_social_posts_config() -> dict:
                     defaults["facebook_groups"]["enabled"],
                 )
             ),
-            "max_groups_per_post": max(0, min(max_groups_per_post, 3)),
+            "max_groups_per_post": max(0, min(max_groups_per_post, 9)),
             "group_urls": [
                 str(group_url).strip()
                 for group_url in raw_group_urls
