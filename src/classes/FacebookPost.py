@@ -124,6 +124,7 @@ class FacebookPost:
                         "group_share": group_result,
                         **evidence,
                     }
+            self._dismiss_blocking_facebook_prompts(driver)
             self._click_publish_button(driver, timeout=60)
             wait_seconds = self._post_publish_wait_seconds(image_path)
             info(f" => Waiting {wait_seconds}s for Facebook publish/upload to settle...")
@@ -1309,24 +1310,39 @@ class FacebookPost:
         driver.execute_script("arguments[0].click();", button)
 
     def _click_publish_button(self, driver: webdriver.Firefox, timeout: int = 60) -> None:
+        self._dismiss_blocking_facebook_prompts(driver)
         try:
             button = self._find_publish_button(driver, timeout)
         except Exception:
-            if self._click_dialog_bottom_primary_button(driver, "Facebook Post fallback"):
+            if self._dismiss_blocking_facebook_prompts(driver):
+                time.sleep(2)
+                button = self._find_publish_button(driver, 20)
+            elif self._click_dialog_bottom_primary_button(driver, "Facebook Post fallback"):
                 time.sleep(3)
                 if not self._composer_is_open(driver):
                     return
-            raise
+                button = self._find_publish_button(driver, 20)
+            else:
+                raise
 
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
         time.sleep(1)
 
         for attempt in range(3):
+            if self._dismiss_blocking_facebook_prompts(driver):
+                time.sleep(2)
+                button = self._find_publish_button(driver, 20)
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                time.sleep(1)
+
             driver.execute_script("arguments[0].click();", button)
             time.sleep(2)
             if self._dismiss_post_publish_prompt(driver):
                 time.sleep(5)
-                return
+                if not self._composer_is_open(driver):
+                    return
+                button = self._find_publish_button(driver, 20)
+                continue
             time.sleep(1)
             if not self._composer_is_open(driver):
                 return
@@ -1334,10 +1350,20 @@ class FacebookPost:
                 try:
                     button = self._find_publish_button(driver, 10)
                 except Exception:
-                    if self._dismiss_post_publish_prompt(driver):
-                        time.sleep(5)
-                        return
+                    if self._dismiss_blocking_facebook_prompts(driver):
+                        time.sleep(2)
+                        button = self._find_publish_button(driver, 20)
+                        continue
                     raise
+
+    def _dismiss_blocking_facebook_prompts(self, driver: webdriver.Firefox) -> bool:
+        dismissed = False
+        for _ in range(3):
+            if not self._dismiss_post_publish_prompt(driver):
+                break
+            dismissed = True
+            time.sleep(2)
+        return dismissed
 
     def _dismiss_post_publish_prompt(self, driver: webdriver.Firefox) -> bool:
         if self._click_post_publish_prompt_button(driver, ["later", "not now", "lúc khác", "để sau", "skip", "bỏ qua"]):
