@@ -588,28 +588,37 @@ class FacebookPost:
                     }
                     const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
                         .filter(isVisible);
-                    const root = dialogs.length ? dialogs[dialogs.length - 1] : document;
-                    const rootText = textFor(root);
-                    const hasSearchInput = Array.from(root.querySelectorAll("input[type='text'], input[role='combobox'], input[placeholder], [contenteditable='true']"))
-                        .filter(isVisible)
-                        .some((el) => {
-                            const text = textFor(el);
-                            return text.includes('search') ||
-                                text.includes('tìm kiếm') ||
-                                text.includes('nhóm') ||
-                                text.includes('group');
-                        });
-                    const hasPickerText =
-                        rootText.includes('chia sẻ lên nhóm') ||
-                        rootText.includes('share to groups') ||
-                        rootText.includes('chọn nhóm') ||
-                        rootText.includes('select groups');
-                    const hasDoneButton =
-                        rootText.includes('xong') ||
-                        rootText.includes('done') ||
-                        rootText.includes('lưu') ||
-                        rootText.includes('save');
-                    return hasPickerText && (hasSearchInput || hasDoneButton);
+                    const roots = dialogs.length ? dialogs : [document.body];
+
+                    return roots.some((root) => {
+                        const rootText = textFor(root);
+                        const hasSearchInput = Array.from(root.querySelectorAll("input[type='text'], input[role='combobox'], input[placeholder], [contenteditable='true']"))
+                            .filter(isVisible)
+                            .some((el) => {
+                                const text = textFor(el);
+                                return text.includes('search') ||
+                                    text.includes('tìm kiếm') ||
+                                    text.includes('nhóm') ||
+                                    text.includes('group');
+                            });
+                        const hasPickerText =
+                            rootText.includes('chia sẻ lên nhóm') ||
+                            rootText.includes('share to groups') ||
+                            rootText.includes('chọn nhóm') ||
+                            rootText.includes('select groups') ||
+                            rootText.includes('đăng trong tối đa') ||
+                            rootText.includes('cộng đồng hiemee');
+                        const hasDoneButton =
+                            rootText.includes('xong') ||
+                            rootText.includes('done') ||
+                            rootText.includes('lưu') ||
+                            rootText.includes('save');
+                        const hasGroupList =
+                            rootText.includes('cộng đồng hiemee') ||
+                            rootText.includes('chọn nhóm') ||
+                            rootText.includes('đăng trong tối đa');
+                        return hasPickerText && (hasSearchInput || hasDoneButton || hasGroupList);
+                    });
                     """
                 )
             )
@@ -768,7 +777,10 @@ class FacebookPost:
             return False
 
     def _return_from_group_picker(self, driver: webdriver.Firefox) -> None:
-        if self._try_click_dialog_button_by_markers(driver, ["done", "xong", "save", "lưu"], 5):
+        if self._try_click_dialog_button_by_markers(driver, ["done", "xong", "save", "lưu"], 8):
+            time.sleep(2)
+            return
+        if self._click_dialog_bottom_primary_button(driver, "Facebook Share groups done fallback"):
             time.sleep(2)
             return
         if self._try_click_dialog_button_by_markers(driver, ["back", "quay lại"], 5):
