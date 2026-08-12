@@ -79,9 +79,10 @@ class YouTubeCommunityPost:
 
             self._activate_composer(driver)
             self._set_text_in_active_composer(driver, text)
+            self._install_youtube_dom_helpers(driver)
 
             if image_path:
-                self._attach_image(driver, image_path)
+                self._attach_image(driver, image_path, text)
 
             self._capture_evidence(driver, "youtube-community-before-click")
             self._click_publish_button(driver, text, timeout=60)
@@ -498,11 +499,73 @@ class YouTubeCommunityPost:
             )
         )
 
-    def _attach_image(self, driver: webdriver.Firefox, image_path: str) -> None:
+    def _install_youtube_dom_helpers(self, driver: webdriver.Firefox) -> None:
+        driver.execute_script(
+            """
+            window.__mpv2FindYouTubeCommunityRoots = function(sample) {
+                sample = String(sample || '').toLowerCase();
+
+                function textFor(el) {
+                    return [
+                        el.innerText || '',
+                        el.textContent || '',
+                        el.getAttribute('aria-label') || '',
+                        el.getAttribute('title') || '',
+                        el.getAttribute('placeholder') || ''
+                    ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                }
+
+                function isVisible(el) {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width > 20 && rect.height > 12 &&
+                        style.display !== 'none' &&
+                        style.visibility !== 'hidden' &&
+                        Number(style.opacity || 1) > 0;
+                }
+
+                const rootSelectors = [
+                    'ytd-backstage-post-renderer',
+                    'ytd-backstage-post-thread-renderer',
+                    'ytd-backstage-post-dialog-renderer',
+                    'tp-yt-paper-dialog',
+                    'yt-dialog',
+                    '[role="dialog"]',
+                    'form',
+                    'div'
+                ];
+
+                return Array.from(document.querySelectorAll(rootSelectors.join(',')))
+                    .filter(isVisible)
+                    .map((el) => {
+                        const rect = el.getBoundingClientRect();
+                        const text = textFor(el);
+                        const area = rect.width * rect.height;
+                        return {el, rect, text, area};
+                    })
+                    .filter((item) =>
+                        item.area > 10000 &&
+                        item.area < 900000 &&
+                        sample &&
+                        item.text.includes(sample)
+                    )
+                    .sort((a, b) => a.area - b.area);
+            };
+            """
+        )
+
+    def _attach_image(
+        self,
+        driver: webdriver.Firefox,
+        image_path: str,
+        text: str,
+    ) -> None:
         if not os.path.exists(image_path):
             raise ValueError(f"Image file not found: {image_path}")
 
-        self._try_click_button(driver, YOUTUBE_IMAGE_MARKERS, "Image", 15)
+        before_preview_count = self._image_preview_count(driver, text)
+        if not self._click_image_button_in_composer(driver, text):
+            self._try_click_button(driver, YOUTUBE_IMAGE_MARKERS, "Image", 15)
         time.sleep(2)
         file_inputs = driver.find_elements(By.XPATH, "//input[@type='file']")
 
@@ -516,7 +579,140 @@ class YouTubeCommunityPost:
         ]
         target_input = image_inputs[-1] if image_inputs else file_inputs[-1]
         target_input.send_keys(os.path.abspath(image_path))
-        time.sleep(8)
+        if not self._wait_for_image_attachment(driver, text, before_preview_count):
+            raise RuntimeError("YouTube Community image did not attach before publishing.")
+
+    def _click_image_button_in_composer(
+        self,
+        driver: webdriver.Firefox,
+        text: str,
+    ) -> bool:
+        sample = text.strip()[:80]
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    const sample = String(arguments[0] || '').toLowerCase();
+                    const markers = ['hình ảnh', 'image', 'photo', 'thêm ảnh', 'add image'];
+
+                    function textFor(el) {
+                        return [
+                            el.innerText || '',
+                            el.textContent || '',
+                            el.getAttribute('aria-label') || '',
+                            el.getAttribute('title') || ''
+                        ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                    }
+
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 20 && rect.height > 12 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
+
+                    function isEnabled(el) {
+                        const style = window.getComputedStyle(el);
+                        const className = String(el.getAttribute('class') || '').toLowerCase();
+                        return !el.disabled &&
+                            el.getAttribute('disabled') === null &&
+                            el.getAttribute('aria-disabled') !== 'true' &&
+                            !className.includes('disabled') &&
+                            !className.includes('disable') &&
+                            style.pointerEvents !== 'none';
+                    }
+
+                    function clickElement(el) {
+                        const rect = el.getBoundingClientRect();
+                        const x = rect.left + rect.width / 2;
+                        const y = rect.top + rect.height / 2;
+                        el.scrollIntoView({block: 'center'});
+                        for (const eventName of ['mouseover', 'mousedown', 'mouseup', 'click']) {
+                            el.dispatchEvent(new MouseEvent(eventName, {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: x,
+                                clientY: y
+                            }));
+                        }
+                        try { el.click(); } catch (error) {}
+                        return true;
+                    }
+
+                    const roots = window.__mpv2FindYouTubeCommunityRoots
+                        ? window.__mpv2FindYouTubeCommunityRoots(sample)
+                        : [];
+                    for (const root of roots) {
+                        const buttons = Array.from(root.el.querySelectorAll(
+                            'button, tp-yt-paper-button, ytcp-button, yt-button-shape button, div[role="button"], a[role="button"]'
+                        ))
+                            .filter(isVisible)
+                            .filter(isEnabled)
+                            .map((el) => {
+                                const text = textFor(el);
+                                const rect = el.getBoundingClientRect();
+                                let score = 0;
+                                if (markers.some((marker) => text === marker)) score += 1000;
+                                if (markers.some((marker) => text.includes(marker))) score += 500;
+                                if (text.includes('đăng') || text.includes('post')) score -= 900;
+                                score += Math.round((rect.left - root.rect.left) / 10);
+                                score += Math.round((rect.top - root.rect.top) / 10);
+                                return {el, score};
+                            })
+                            .filter((item) => item.score >= 500)
+                            .sort((a, b) => b.score - a.score);
+                        if (buttons.length) return clickElement(buttons[0].el);
+                    }
+                    return false;
+                    """,
+                    sample,
+                )
+            )
+        except Exception:
+            return False
+
+    def _image_preview_count(self, driver: webdriver.Firefox, text: str) -> int:
+        try:
+            return int(
+                driver.execute_script(
+                    """
+                    const sample = String(arguments[0] || '').toLowerCase();
+                    const roots = window.__mpv2FindYouTubeCommunityRoots
+                        ? window.__mpv2FindYouTubeCommunityRoots(sample)
+                        : [];
+                    const root = roots[0]?.el || document;
+                    return Array.from(root.querySelectorAll('img, video, canvas, ytd-thumbnail, yt-img-shadow'))
+                        .filter((el) => {
+                            const rect = el.getBoundingClientRect();
+                            const style = window.getComputedStyle(el);
+                            return rect.width > 40 && rect.height > 40 &&
+                                style.display !== 'none' &&
+                                style.visibility !== 'hidden' &&
+                                Number(style.opacity || 1) > 0;
+                        }).length;
+                    """,
+                    text.strip()[:80],
+                )
+                or 0
+            )
+        except Exception:
+            return 0
+
+    def _wait_for_image_attachment(
+        self,
+        driver: webdriver.Firefox,
+        text: str,
+        before_preview_count: int,
+    ) -> bool:
+        deadline = time.time() + 45
+        while time.time() < deadline:
+            if self._image_preview_count(driver, text) > before_preview_count:
+                return True
+            time.sleep(2)
+        return False
 
     def _click_button(
         self,
