@@ -426,33 +426,101 @@ class FacebookPost:
         return targets
 
     def _click_share_to_groups(self, driver: webdriver.Firefox) -> None:
-        row = self._find_dialog_row_by_markers(
-            driver,
-            FACEBOOK_SHARE_GROUP_MARKERS,
-            timeout=20,
-        )
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", row)
-        time.sleep(1)
+        try:
+            row = self._find_dialog_row_by_markers(
+                driver,
+                FACEBOOK_SHARE_GROUP_MARKERS,
+                timeout=12,
+            )
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", row)
+            time.sleep(1)
 
-        for attempt in range(3):
-            if attempt == 0:
-                try:
-                    ActionChains(driver).move_to_element(row).click().perform()
-                except Exception:
-                    pass
-            elif attempt == 1:
-                try:
-                    ActionChains(driver).move_to_element_with_offset(row, 260, 0).click().perform()
-                except Exception:
-                    pass
-            else:
-                self._click_element_right_edge(driver, row)
+            for attempt in range(3):
+                if attempt == 0:
+                    try:
+                        ActionChains(driver).move_to_element(row).click().perform()
+                    except Exception:
+                        pass
+                elif attempt == 1:
+                    try:
+                        ActionChains(driver).move_to_element_with_offset(row, 260, 0).click().perform()
+                    except Exception:
+                        pass
+                else:
+                    self._click_element_right_edge(driver, row)
 
-            time.sleep(2)
-            if self._group_picker_is_open(driver):
-                return
+                time.sleep(2)
+                if self._group_picker_is_open(driver):
+                    return
+        except Exception as exc:
+            warning(f"Could not click Facebook Share to groups row by DOM markers: {exc}")
+
+        info(" => Trying Facebook Share to groups modal-coordinate fallback...")
+        for ratio in (0.56, 0.53, 0.59, 0.50):
+            if self._click_dialog_right_edge_at_ratio(driver, ratio):
+                time.sleep(2)
+                if self._group_picker_is_open(driver):
+                    return
 
         raise RuntimeError("Could not open Facebook Share to groups picker.")
+
+    def _click_dialog_right_edge_at_ratio(
+        self,
+        driver: webdriver.Firefox,
+        y_ratio: float,
+    ) -> bool:
+        try:
+            dialog = self._largest_visible_dialog(driver)
+            if not dialog:
+                return False
+
+            rect = driver.execute_script(
+                """
+                const rect = arguments[0].getBoundingClientRect();
+                return {
+                    width: rect.width,
+                    height: rect.height,
+                    rightOffsetFromCenter: Math.max(20, rect.width / 2 - 32),
+                    yOffsetFromCenter: Math.max(
+                        -rect.height / 2 + 20,
+                        Math.min(rect.height / 2 - 20, rect.height * arguments[1] - rect.height / 2)
+                    )
+                };
+                """,
+                dialog,
+                y_ratio,
+            )
+            ActionChains(driver).move_to_element_with_offset(
+                dialog,
+                int(rect["rightOffsetFromCenter"]),
+                int(rect["yOffsetFromCenter"]),
+            ).click().perform()
+            return True
+        except Exception:
+            return False
+
+    def _largest_visible_dialog(self, driver: webdriver.Firefox) -> WebElement | None:
+        try:
+            return driver.execute_script(
+                """
+                function isVisible(el) {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width > 300 && rect.height > 300 &&
+                        style.display !== 'none' &&
+                        style.visibility !== 'hidden' &&
+                        Number(style.opacity || 1) > 0;
+                }
+
+                const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                    .filter(isVisible)
+                    .map((el) => ({el, rect: el.getBoundingClientRect()}))
+                    .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
+                return dialogs[0]?.el || null;
+                """
+            )
+        except Exception:
+            return None
 
     def _click_element_right_edge(
         self,
