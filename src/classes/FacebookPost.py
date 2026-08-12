@@ -379,11 +379,15 @@ class FacebookPost:
             time.sleep(3)
 
             for target in targets:
-                if self._select_group(driver, target):
+                if self._target_group_is_selected(driver, target) or self._select_group(driver, target):
                     selected.append(target)
+                    info(f" => Selected Facebook group: {target['label']}")
                     time.sleep(1)
 
-            self._return_from_group_picker(driver)
+            if not selected:
+                raise RuntimeError("No configured Facebook group was selected.")
+            if not self._return_from_group_picker(driver):
+                raise RuntimeError("Could not close Facebook Share to groups picker with Done/Xong.")
             return {
                 "attempted": True,
                 "enabled": True,
@@ -586,6 +590,19 @@ class FacebookPost:
                             el.getAttribute('placeholder') || ''
                         ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
                     }
+                    const bodyText = textFor(document.body);
+                    if (
+                        bodyText.includes('chia sẻ lên nhóm') &&
+                        (
+                            bodyText.includes('chọn nhóm') ||
+                            bodyText.includes('đăng trong tối đa') ||
+                            bodyText.includes('cộng đồng hiemee') ||
+                            bodyText.includes('xong')
+                        )
+                    ) {
+                        return true;
+                    }
+
                     const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
                         .filter(isVisible);
                     const roots = dialogs.length ? dialogs : [document.body];
@@ -631,8 +648,9 @@ class FacebookPost:
         group_url = target.get("url", "")
         search_terms = [term for term in [group_name, group_id, group_url] if term]
 
-        self._try_search_group(driver, search_terms[0] if search_terms else "")
-        time.sleep(2)
+        if not self._target_group_visible(driver, target):
+            self._try_search_group(driver, search_terms[0] if search_terms else "")
+            time.sleep(2)
 
         clicked = driver.execute_script(
             """
@@ -718,7 +736,118 @@ class FacebookPost:
             group_id,
             group_url,
         )
-        return bool(clicked)
+        time.sleep(1)
+        return bool(clicked) and self._target_group_is_selected(driver, target)
+
+    def _target_group_visible(
+        self,
+        driver: webdriver.Firefox,
+        target: dict[str, str],
+    ) -> bool:
+        return self._target_group_match(driver, target, require_selected=False)
+
+    def _target_group_is_selected(
+        self,
+        driver: webdriver.Firefox,
+        target: dict[str, str],
+    ) -> bool:
+        return self._target_group_match(driver, target, require_selected=True)
+
+    def _target_group_match(
+        self,
+        driver: webdriver.Firefox,
+        target: dict[str, str],
+        require_selected: bool,
+    ) -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    function normalize(value) {
+                        return String(value || '')
+                            .normalize('NFD')
+                            .replace(/[\\u0300-\\u036f]/g, '')
+                            .replace(/đ/g, 'd')
+                            .replace(/Đ/g, 'd')
+                            .toLowerCase();
+                    }
+
+                    const terms = [arguments[0], arguments[1], arguments[2]]
+                        .map(normalize)
+                        .filter(Boolean);
+                    const requireSelected = Boolean(arguments[3]);
+                    if (!terms.length) return false;
+
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 20 && rect.height > 12 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
+
+                    function textFor(el) {
+                        return [
+                            el.innerText || '',
+                            el.textContent || '',
+                            el.getAttribute('aria-label') || '',
+                            el.getAttribute('aria-checked') || '',
+                            el.getAttribute('href') || ''
+                        ].join(' ');
+                    }
+
+                    function rowFor(el) {
+                        let row = el.closest("div[role='button'], label") || el;
+                        let probe = el;
+                        for (let depth = 0; depth < 8 && probe; depth += 1) {
+                            const rect = probe.getBoundingClientRect();
+                            const text = normalize(textFor(probe));
+                            if (
+                                rect.width > 300 &&
+                                rect.height > 40 &&
+                                rect.height < 180 &&
+                                terms.some((term) => text.includes(term))
+                            ) {
+                                row = probe;
+                            }
+                            probe = probe.parentElement;
+                        }
+                        return row;
+                    }
+
+                    function isSelected(el) {
+                        if (el.getAttribute('aria-checked') === 'true') return true;
+                        if (Array.from(el.querySelectorAll("[aria-checked='true'], input[type='checkbox']:checked")).some(isVisible)) {
+                            return true;
+                        }
+                        const text = normalize(textFor(el));
+                        return text.includes('selected') || text.includes('da chon');
+                    }
+
+                    const candidates = Array.from(document.querySelectorAll("div[role='button'], label, a, input[type='checkbox'], div"))
+                        .filter(isVisible)
+                        .filter((el) => {
+                            const text = normalize(textFor(el));
+                            return terms.some((term) => text.includes(term)) &&
+                                !text.includes('search') &&
+                                !text.includes('tìm kiếm');
+                        });
+
+                    for (const candidate of candidates) {
+                        const row = rowFor(candidate);
+                        if (!requireSelected || isSelected(row)) return true;
+                    }
+                    return false;
+                    """,
+                    target.get("name", ""),
+                    target.get("id", ""),
+                    target.get("url", ""),
+                    require_selected,
+                )
+            )
+        except Exception:
+            return False
 
     def _try_search_group(self, driver: webdriver.Firefox, query: str) -> bool:
         if not query:
@@ -776,16 +905,88 @@ class FacebookPost:
         except Exception:
             return False
 
-    def _return_from_group_picker(self, driver: webdriver.Firefox) -> None:
+    def _return_from_group_picker(self, driver: webdriver.Firefox) -> bool:
+        if self._click_group_picker_done(driver):
+            time.sleep(2)
+            return True
         if self._try_click_dialog_button_by_markers(driver, ["done", "xong", "save", "lưu"], 8):
             time.sleep(2)
-            return
+            return True
         if self._click_dialog_bottom_primary_button(driver, "Facebook Share groups done fallback"):
             time.sleep(2)
-            return
+            return True
         if self._try_click_dialog_button_by_markers(driver, ["back", "quay lại"], 5):
             time.sleep(2)
-            return
+            return True
+        return False
+
+    def _click_group_picker_done(self, driver: webdriver.Firefox) -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 20 && rect.height > 12 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
+                    function textFor(el) {
+                        return [
+                            el.innerText || '',
+                            el.textContent || '',
+                            el.getAttribute('aria-label') || '',
+                            el.getAttribute('title') || ''
+                        ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                    }
+                    function clickElement(el) {
+                        const rect = el.getBoundingClientRect();
+                        const x = rect.left + rect.width / 2;
+                        const y = rect.top + rect.height / 2;
+                        el.scrollIntoView({block: 'center'});
+                        for (const eventName of ['mouseover', 'mousedown', 'mouseup', 'click']) {
+                            el.dispatchEvent(new MouseEvent(eventName, {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: x,
+                                clientY: y
+                            }));
+                        }
+                        return true;
+                    }
+                    const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                        .filter(isVisible)
+                        .map((el) => ({el, text: textFor(el), rect: el.getBoundingClientRect()}))
+                        .filter((item) =>
+                            item.text.includes('chia sẻ lên nhóm') ||
+                            item.text.includes('chọn nhóm') ||
+                            item.text.includes('đăng trong tối đa') ||
+                            item.text.includes('cộng đồng hiemee')
+                        )
+                        .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
+                    const root = dialogs[0]?.el || document.body;
+                    const candidates = Array.from(root.querySelectorAll("div[role='button'], button, a[role='button']"))
+                        .filter(isVisible)
+                        .filter((el) => {
+                            const text = textFor(el);
+                            return text === 'xong' ||
+                                text === 'done' ||
+                                text === 'lưu' ||
+                                text === 'save' ||
+                                text.includes('xong') ||
+                                text.includes('done');
+                        })
+                        .sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top);
+                    if (!candidates.length) return false;
+                    return clickElement(candidates[0]);
+                    """
+                )
+            )
+        except Exception:
+            return False
 
     def _extract_group_id(self, group_url: str) -> str:
         match = re.search(r"/groups/([^/?#]+)", group_url)
