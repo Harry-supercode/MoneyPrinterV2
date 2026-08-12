@@ -135,6 +135,19 @@ class FacebookPost:
                     " => Facebook post click completed but publish could not be verified: "
                     f"{verification['reason']}"
                 )
+                if self._hold_browser_open_if_requested(
+                    driver,
+                    f"Facebook publish verification failed: {verification['reason']}",
+                ):
+                    return {
+                        "enabled": True,
+                        "success": False,
+                        "clicked": True,
+                        "group_share": group_result,
+                        "browser_left_open": True,
+                        **verification,
+                        **evidence,
+                    }
                 driver.quit()
                 return {
                     "enabled": True,
@@ -159,6 +172,15 @@ class FacebookPost:
             traceback.print_exc()
             warning(" => Failed to publish Facebook text/image post.")
             evidence = self._capture_evidence(driver, "facebook-post-error")
+            if self._hold_browser_open_if_requested(driver, "Facebook publish exception"):
+                return {
+                    "enabled": True,
+                    "success": False,
+                    "clicked": False,
+                    "reason": "exception",
+                    "browser_left_open": True,
+                    **evidence,
+                }
             try:
                 driver.quit()
             except Exception:
@@ -172,9 +194,37 @@ class FacebookPost:
             }
 
     def _post_publish_wait_seconds(self, image_path: str = "") -> int:
+        configured_hold = self._env_int("MPV2_FACEBOOK_POST_HOLD_SECONDS", 0)
         if image_path:
-            return max(self.post_wait_seconds, 120)
-        return max(self.post_wait_seconds, 45)
+            return max(self.post_wait_seconds, 120, configured_hold)
+        return max(self.post_wait_seconds, 45, configured_hold)
+
+    def _hold_browser_open_if_requested(
+        self,
+        driver: webdriver.Firefox,
+        reason: str,
+    ) -> bool:
+        hold_seconds = self._env_int("MPV2_FACEBOOK_KEEP_BROWSER_OPEN_SECONDS", 0)
+        if hold_seconds <= 0:
+            return False
+
+        hold_seconds = min(hold_seconds, 3600)
+        warning(
+            f" => Keeping Firefox open for {hold_seconds}s after {reason}. "
+            "Do not close the VNC/browser while Facebook finishes the post."
+        )
+        try:
+            self._capture_evidence(driver, "facebook-post-browser-left-open")
+        except Exception:
+            pass
+        time.sleep(hold_seconds)
+        return True
+
+    def _env_int(self, name: str, default: int) -> int:
+        try:
+            return int(os.environ.get(name, default))
+        except (TypeError, ValueError):
+            return default
 
     def _assert_firefox_profile_available(self) -> None:
         lock_path = os.path.join(self.fp_profile_path, ".parentlock")
