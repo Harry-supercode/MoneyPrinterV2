@@ -643,37 +643,68 @@ class FacebookPost:
             return False
 
     def _select_group(self, driver: webdriver.Firefox, target: dict[str, str]) -> bool:
-        if not self._target_group_visible(driver, target):
-            group_name = target.get("name", "")
-            group_id = target.get("id", "")
-            group_url = target.get("url", "")
-            search_terms = [term for term in [group_name, group_id, group_url] if term]
-            self._try_search_group(driver, search_terms[0] if search_terms else "")
-            time.sleep(2)
+        group_name = target.get("name", "")
+        group_id = target.get("id", "")
+        group_url = target.get("url", "")
+        search_terms = [term for term in [group_name, group_id, group_url] if term]
 
-        if self._target_group_is_selected(driver, target):
-            return True
+        self._try_search_group(driver, search_terms[0] if search_terms else "")
+        time.sleep(2)
 
-        row = self._find_target_group_row(driver, target)
-        if row is None:
-            return False
+        clicked = driver.execute_script(
+            """
+            function normalize(value) {
+                return String(value || '')
+                    .normalize('NFD')
+                    .replace(/[\\u0300-\\u036f]/g, '')
+                    .replace(/đ/g, 'd')
+                    .replace(/Đ/g, 'd')
+                    .toLowerCase();
+            }
 
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", row)
-        time.sleep(1)
+            const groupName = normalize(arguments[0]);
+            const groupId = normalize(arguments[1]);
+            const groupUrl = normalize(arguments[2]);
+            const exactTerms = [groupName, groupId, groupUrl].filter(Boolean);
 
-        for attempt in range(3):
-            if attempt == 0:
-                self._click_group_row_checkbox(driver, row)
-            elif attempt == 1:
-                self._native_click_row_right_edge(driver, row)
-            else:
-                self._click_element_right_edge(driver, row)
+            function isVisible(el) {
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle(el);
+                return rect.width > 20 && rect.height > 12 &&
+                    style.display !== 'none' &&
+                    style.visibility !== 'hidden' &&
+                    Number(style.opacity || 1) > 0;
+            }
 
-            time.sleep(1)
-            if self._target_group_is_selected(driver, target):
-                return True
+            function textFor(el) {
+                return [
+                    el.innerText || '',
+                    el.textContent || '',
+                    el.getAttribute('aria-label') || '',
+                    el.getAttribute('href') || ''
+                ].join(' ');
+            }
 
-        return False
+            const candidates = Array.from(document.querySelectorAll("div[role='button'], label, a, input[type='checkbox']"))
+                .filter(isVisible)
+                .filter((el) => {
+                    const text = normalize(textFor(el));
+                    if (!exactTerms.some((term) => text.includes(term))) return false;
+                    return !text.includes('search') && !text.includes('tìm kiếm');
+                });
+
+            let target = candidates[0];
+            if (!target) return false;
+            const button = target.closest("div[role='button'], label") || target;
+            button.scrollIntoView({block: 'center'});
+            button.click();
+            return true;
+            """,
+            group_name,
+            group_id,
+            group_url,
+        )
+        return bool(clicked)
 
     def _click_group_row_checkbox(
         self,
