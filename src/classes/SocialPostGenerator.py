@@ -13,6 +13,17 @@ from .SocialPostImageGenerator import SocialPostImageGenerator
 
 
 class SocialPostGenerator:
+    CONTENT_ANGLES = [
+        "minh bạch vận hành",
+        "bài học từ sản phẩm",
+        "giá trị cho người dùng cuối",
+        "kết nối dữ liệu và quy trình",
+        "góc nhìn founder",
+        "ứng dụng thực tế trong kinh doanh",
+        "hệ sinh thái sản phẩm",
+        "tối ưu quản lý cộng đồng",
+    ]
+
     def __init__(self, config: dict):
         self.config = config
         self.output_root = Path(ROOT_DIR) / str(
@@ -20,8 +31,10 @@ class SocialPostGenerator:
         )
 
     def generate(self) -> dict:
-        topic = self._select_topic()
-        text = self._generate_text(topic)
+        recent_drafts = self._recent_drafts()
+        topic = self._select_topic(recent_drafts)
+        angle = self._select_angle(recent_drafts)
+        text = self._generate_text(topic, angle, recent_drafts)
         image_path = self._select_image_path()
         if not image_path:
             image_path = SocialPostImageGenerator(self.config).generate(topic, text)
@@ -29,6 +42,7 @@ class SocialPostGenerator:
             "id": self._draft_id(text, image_path),
             "created_at": datetime.now().isoformat(timespec="seconds"),
             "topic": topic,
+            "angle": angle,
             "text": text,
             "image_path": image_path,
             "platforms": {
@@ -46,32 +60,68 @@ class SocialPostGenerator:
             json.dump(draft, file, ensure_ascii=False, indent=2)
         return str(draft_path)
 
-    def _select_topic(self) -> str:
+    def _select_topic(self, recent_drafts: list[dict]) -> str:
         topics = self.config.get("topics") or []
-        if topics:
-            return random.choice(topics)
+        if not topics:
+            brand_config = get_youtube_brand_topics_config()
+            concepts = brand_config.get("concepts") or []
+            keywords = brand_config.get("keywords") or []
+            topics = concepts + keywords
 
-        brand_config = get_youtube_brand_topics_config()
-        concepts = brand_config.get("concepts") or []
-        keywords = brand_config.get("keywords") or []
-        candidates = [str(item).strip() for item in concepts + keywords if str(item).strip()]
+        candidates = [str(item).strip() for item in topics if str(item).strip()]
+        recent_topics = {
+            str(draft.get("topic", "")).strip().lower()
+            for draft in recent_drafts[:10]
+            if str(draft.get("topic", "")).strip()
+        }
+        fresh_candidates = [
+            candidate for candidate in candidates if candidate.lower() not in recent_topics
+        ]
+        if fresh_candidates:
+            return random.choice(fresh_candidates)
         if candidates:
             return random.choice(candidates)
 
         return str(self.config.get("brand_name", "HIEMEE"))
 
-    def _generate_text(self, topic: str) -> str:
+    def _select_angle(self, recent_drafts: list[dict]) -> str:
+        recent_angles = {
+            str(draft.get("angle", "")).strip().lower()
+            for draft in recent_drafts[:8]
+            if str(draft.get("angle", "")).strip()
+        }
+        candidates = [
+            angle for angle in self.CONTENT_ANGLES if angle.lower() not in recent_angles
+        ] or self.CONTENT_ANGLES
+        return random.choice(candidates)
+
+    def _generate_text(
+        self,
+        topic: str,
+        angle: str,
+        recent_drafts: list[dict],
+    ) -> str:
         language = str(self.config.get("language", "vi")).strip() or "vi"
         brand_name = str(self.config.get("brand_name", "HIEMEE")).strip() or "HIEMEE"
         tone = str(self.config.get("tone", "concise, useful")).strip()
         max_chars = int(self.config.get("max_chars", 900))
+        recent_summaries = [
+            str(draft.get("text", "")).strip().split("\n", 1)[0][:180]
+            for draft in recent_drafts[:5]
+            if str(draft.get("text", "")).strip()
+        ]
+        recent_block = "\n".join(f"- {summary}" for summary in recent_summaries)
         prompt = (
             f"Write one social media post in {language} for {brand_name}.\n"
             f"Topic: {topic}\n"
+            f"Angle for this run: {angle}\n"
             f"Tone: {tone}\n"
+            f"Run timestamp: {datetime.now().isoformat(timespec='seconds')}\n"
             "Rules:\n"
             "- If the language is Vietnamese, write only Vietnamese with common English brand/product names.\n"
             "- 2 to 5 short paragraphs.\n"
+            "- Use a specific opening sentence that is different from previous posts.\n"
+            "- Do not reuse the same first sentence, paragraph structure, or example from recent posts.\n"
             "- No markdown headings.\n"
             "- No fake metrics, guarantees, or unsupported claims.\n"
             "- Avoid clickbait.\n"
@@ -83,6 +133,8 @@ class SocialPostGenerator:
             f"- Maximum {max_chars} characters.\n"
             "- Write only the main post body."
         )
+        if recent_block:
+            prompt += f"\nRecent posts to avoid repeating:\n{recent_block}"
         try:
             text = generate_text(prompt).strip()
         except Exception as exc:
@@ -96,6 +148,25 @@ class SocialPostGenerator:
 
         body = self._clean_text(text, max_chars)
         return self._append_footer(body)
+
+    def _recent_drafts(self) -> list[dict]:
+        if not self.output_root.exists():
+            return []
+
+        drafts = []
+        for path in sorted(
+            self.output_root.glob("*.json"),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )[:20]:
+            try:
+                with path.open("r", encoding="utf-8") as file:
+                    draft = json.load(file)
+                if isinstance(draft, dict):
+                    drafts.append(draft)
+            except (OSError, ValueError, TypeError):
+                continue
+        return drafts
 
     def _clean_text(self, text: str, max_chars: int) -> str:
         cleaned = str(text).replace("```", "").strip().strip('"')

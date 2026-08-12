@@ -1,5 +1,7 @@
 import base64
 import os
+import random
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -32,9 +34,9 @@ class SocialPostImageGenerator:
         provider = str(image_config.get("provider", "nanobanana2")).strip().lower()
 
         if provider == "pexels":
-            return self._generate_pexels(prompt) or self._generate_nanobanana2(prompt) or ""
+            return self._generate_pexels(prompt, topic) or self._generate_nanobanana2(prompt) or ""
 
-        return self._generate_nanobanana2(prompt) or self._generate_pexels(prompt) or ""
+        return self._generate_nanobanana2(prompt) or self._generate_pexels(prompt, topic) or ""
 
     def _build_prompt(self, topic: str, text: str, image_config: dict) -> str:
         style = str(
@@ -98,7 +100,7 @@ class SocialPostImageGenerator:
             warning(f"Failed to generate social post image with Nano Banana 2: {exc}")
             return ""
 
-    def _generate_pexels(self, prompt: str) -> str:
+    def _generate_pexels(self, prompt: str, topic: str = "") -> str:
         api_key = get_pexels_api_key()
         if not api_key:
             warning("pexels_api_key/PEXELS_API_KEY is not configured for social post image generation.")
@@ -106,13 +108,15 @@ class SocialPostImageGenerator:
 
         try:
             info(" => Downloading social post image from Pexels...")
+            query = self._build_pexels_query(topic, prompt)
             response = requests.get(
                 "https://api.pexels.com/v1/search",
                 headers={"Authorization": api_key},
                 params={
-                    "query": prompt[:180],
+                    "query": query,
                     "orientation": "portrait",
-                    "per_page": 1,
+                    "per_page": 10,
+                    "page": random.randint(1, 8),
                 },
                 timeout=60,
             )
@@ -122,7 +126,8 @@ class SocialPostImageGenerator:
                 warning("Pexels did not return photos for social post image query.")
                 return ""
 
-            photo_url = photos[0]["src"].get("portrait") or photos[0]["src"].get("large")
+            photo = random.choice(photos)
+            photo_url = photo["src"].get("portrait") or photo["src"].get("large")
             if not photo_url:
                 warning("Pexels photo response did not include a usable social post image URL.")
                 return ""
@@ -133,6 +138,45 @@ class SocialPostImageGenerator:
         except Exception as exc:
             warning(f"Failed to download social post image from Pexels: {exc}")
             return ""
+
+    def _build_pexels_query(self, topic: str, prompt: str) -> str:
+        source = f"{topic} {prompt}".lower()
+        if any(term in source for term in ["ev", "mobility", "xe điện", "green"]):
+            base_queries = [
+                "electric vehicle city vietnam",
+                "green mobility technology",
+                "urban transport technology",
+            ]
+        elif any(term in source for term in ["realty", "real estate", "bất động sản"]):
+            base_queries = [
+                "modern city real estate",
+                "business property technology",
+                "urban buildings vietnam",
+            ]
+        elif any(term in source for term in ["fund", "finance", "quỹ", "cashflow"]):
+            base_queries = [
+                "business finance planning",
+                "community teamwork finance",
+                "startup financial dashboard",
+            ]
+        elif any(term in source for term in ["restaurant", "hospitality", "hie-palace"]):
+            base_queries = [
+                "restaurant operations team",
+                "hospitality business technology",
+                "cafe restaurant management",
+            ]
+        else:
+            base_queries = [
+                "startup technology team vietnam",
+                "business automation workspace",
+                "modern technology office",
+                "data analytics teamwork",
+            ]
+
+        cleaned_topic = re.sub(r"[^a-zA-Z0-9\s]", " ", topic)
+        topic_words = " ".join(cleaned_topic.split()[:5]).strip()
+        candidates = base_queries + ([topic_words] if topic_words else [])
+        return random.choice([query for query in candidates if query])[:80]
 
     def _persist_image(self, image_bytes: bytes, provider: str) -> str:
         self.output_root.mkdir(parents=True, exist_ok=True)
