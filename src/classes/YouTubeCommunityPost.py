@@ -772,7 +772,16 @@ class YouTubeCommunityPost:
                 time.sleep(4)
                 if not self._composer_is_open(driver, text):
                     return
+                if self._click_visible_publish_button(driver):
+                    time.sleep(4)
+                    if not self._composer_is_open(driver, text):
+                        return
             else:
+                if self._click_visible_publish_button(driver):
+                    last_clicked = True
+                    time.sleep(4)
+                    if not self._composer_is_open(driver, text):
+                        return
                 time.sleep(1)
 
         if last_clicked:
@@ -782,6 +791,95 @@ class YouTubeCommunityPost:
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
         time.sleep(1)
         driver.execute_script("arguments[0].click();", button)
+
+    def _click_visible_publish_button(self, driver: webdriver.Firefox) -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    function textFor(el) {
+                        return [
+                            el.innerText || '',
+                            el.textContent || '',
+                            el.getAttribute('aria-label') || '',
+                            el.getAttribute('title') || ''
+                        ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                    }
+
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 20 && rect.height > 12 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
+
+                    function isEnabled(el) {
+                        const style = window.getComputedStyle(el);
+                        const className = String(el.getAttribute('class') || '').toLowerCase();
+                        return !el.disabled &&
+                            el.getAttribute('disabled') === null &&
+                            el.getAttribute('aria-disabled') !== 'true' &&
+                            !className.includes('disabled') &&
+                            !className.includes('disable') &&
+                            style.pointerEvents !== 'none';
+                    }
+
+                    function clickElement(el) {
+                        const rect = el.getBoundingClientRect();
+                        const x = rect.left + rect.width / 2;
+                        const y = rect.top + rect.height / 2;
+                        el.scrollIntoView({block: 'center'});
+                        for (const eventName of ['pointerdown', 'mousedown', 'mouseup', 'click']) {
+                            el.dispatchEvent(new MouseEvent(eventName, {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: x,
+                                clientY: y
+                            }));
+                        }
+                        try { el.click(); } catch (error) {}
+                        return true;
+                    }
+
+                    function luminance(color) {
+                        const match = String(color || '').match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/i);
+                        if (!match) return 255;
+                        return (Number(match[1]) + Number(match[2]) + Number(match[3])) / 3;
+                    }
+
+                    const candidates = Array.from(document.querySelectorAll(
+                        'button, tp-yt-paper-button, ytcp-button, yt-button-shape button, div[role="button"], a[role="button"]'
+                    ))
+                        .filter(isVisible)
+                        .filter(isEnabled)
+                        .map((el) => {
+                            const text = textFor(el);
+                            const rect = el.getBoundingClientRect();
+                            const style = window.getComputedStyle(el);
+                            let score = 0;
+                            if (text === 'đăng' || text === 'post') score += 1000;
+                            if (text.includes('đăng') || text.includes('post')) score += 400;
+                            if (text.includes('hủy') || text.includes('cancel')) score -= 900;
+                            if (text.includes('bài đăng của tôi') || text.includes('my posts')) score -= 900;
+                            if (text.includes('tạo') || text.includes('create')) score -= 600;
+                            if (text.includes('lên lịch') || text.includes('schedule')) score -= 250;
+                            if (luminance(style.backgroundColor) < 90) score += 500;
+                            score += Math.round(rect.left / 8);
+                            score -= Math.round(rect.top / 20);
+                            return {el, score};
+                        })
+                        .filter((item) => item.score >= 900)
+                        .sort((a, b) => b.score - a.score);
+
+                    return candidates.length ? clickElement(candidates[0].el) : false;
+                    """
+                )
+            )
+        except Exception:
+            return False
 
     def _click_publish_button_in_composer(
         self,
