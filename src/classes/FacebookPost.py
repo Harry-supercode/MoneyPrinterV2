@@ -929,11 +929,116 @@ class FacebookPost:
 
         for attempt in range(3):
             driver.execute_script("arguments[0].click();", button)
-            time.sleep(3)
+            time.sleep(2)
+            if self._dismiss_post_publish_prompt(driver):
+                time.sleep(5)
+                return
+            time.sleep(1)
             if not self._composer_is_open(driver):
                 return
             if attempt < 2:
-                button = self._find_publish_button(driver, 10)
+                try:
+                    button = self._find_publish_button(driver, 10)
+                except Exception:
+                    if self._dismiss_post_publish_prompt(driver):
+                        time.sleep(5)
+                        return
+                    raise
+
+    def _dismiss_post_publish_prompt(self, driver: webdriver.Firefox) -> bool:
+        if self._click_post_publish_prompt_button(driver, ["later", "not now", "lúc khác", "để sau", "skip", "bỏ qua"]):
+            info(" => Dismissed Facebook post-publish prompt.")
+            return True
+        if self._click_post_publish_prompt_button(driver, ["close", "đóng"]):
+            info(" => Closed Facebook post-publish prompt.")
+            return True
+        return False
+
+    def _click_post_publish_prompt_button(
+        self,
+        driver: webdriver.Firefox,
+        button_markers: list[str],
+    ) -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    const buttonMarkers = arguments[0].map((value) => String(value).toLowerCase());
+                    const promptMarkers = [
+                        'trò chuyện trực tiếp',
+                        'goi ngay',
+                        'gọi ngay',
+                        'add call now',
+                        'live chat',
+                        'thêm nút',
+                        'add button'
+                    ];
+
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 20 && rect.height > 12 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
+
+                    function textFor(el) {
+                        return [
+                            el.innerText || '',
+                            el.textContent || '',
+                            el.getAttribute('aria-label') || '',
+                            el.getAttribute('title') || ''
+                        ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                    }
+
+                    function clickElement(el) {
+                        const rect = el.getBoundingClientRect();
+                        const x = rect.left + rect.width / 2;
+                        const y = rect.top + rect.height / 2;
+                        el.scrollIntoView({block: 'center'});
+                        for (const eventName of ['mouseover', 'mousedown', 'mouseup', 'click']) {
+                            el.dispatchEvent(new MouseEvent(eventName, {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: x,
+                                clientY: y
+                            }));
+                        }
+                        return true;
+                    }
+
+                    const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                        .filter(isVisible)
+                        .map((el) => ({el, text: textFor(el), rect: el.getBoundingClientRect()}))
+                        .filter((item) => promptMarkers.some((marker) => item.text.includes(marker)))
+                        .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
+
+                    if (!dialogs.length) return false;
+                    const root = dialogs[0].el;
+                    const candidates = Array.from(root.querySelectorAll("div[role='button'], button, a[role='button']"))
+                        .filter(isVisible)
+                        .filter((el) => {
+                            const text = textFor(el);
+                            return buttonMarkers.some((marker) => text.includes(marker));
+                        });
+
+                    if (!candidates.length) return false;
+                    candidates.sort((a, b) => {
+                        const ta = textFor(a);
+                        const tb = textFor(b);
+                        const exactA = buttonMarkers.some((marker) => ta === marker) ? 1 : 0;
+                        const exactB = buttonMarkers.some((marker) => tb === marker) ? 1 : 0;
+                        return exactB - exactA;
+                    });
+                    return clickElement(candidates[0]);
+                    """,
+                    button_markers,
+                )
+            )
+        except Exception:
+            return False
 
     def _try_click_next_button(self, driver: webdriver.Firefox, timeout: int = 20) -> bool:
         try:
