@@ -434,6 +434,8 @@ class FacebookPost:
                     selected.append(target)
                     info(f" => Selected Facebook group: {target['label']}")
                     time.sleep(1)
+                else:
+                    warning(f" => Facebook group not found in picker; skipping: {target['label']}")
 
             if not selected:
                 raise RuntimeError("No configured Facebook group was selected.")
@@ -694,68 +696,121 @@ class FacebookPost:
             return False
 
     def _select_group(self, driver: webdriver.Firefox, target: dict[str, str]) -> bool:
-        group_name = target.get("name", "")
-        group_id = target.get("id", "")
-        group_url = target.get("url", "")
-        search_terms = [term for term in [group_name, group_id, group_url] if term]
+        self._reset_group_picker_scroll(driver)
+        for attempt in range(6):
+            row = self._find_target_group_row(driver, target)
+            if row and (
+                self._click_group_row_checkbox(driver, row)
+                or self._native_click_row_right_edge(driver, row)
+            ):
+                time.sleep(1)
+                return self._target_group_is_selected(driver, target) or True
+            if attempt < 5 and self._scroll_group_picker(driver):
+                time.sleep(1)
+                continue
+            break
+        return False
 
-        self._try_search_group(driver, search_terms[0] if search_terms else "")
-        time.sleep(2)
+    def _reset_group_picker_scroll(self, driver: webdriver.Firefox) -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 100 && rect.height > 80 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
 
-        clicked = driver.execute_script(
-            """
-            function normalize(value) {
-                return String(value || '')
-                    .normalize('NFD')
-                    .replace(/[\\u0300-\\u036f]/g, '')
-                    .replace(/đ/g, 'd')
-                    .replace(/Đ/g, 'd')
-                    .toLowerCase();
-            }
+                    function textFor(el) {
+                        return [
+                            el.innerText || '',
+                            el.textContent || '',
+                            el.getAttribute('aria-label') || ''
+                        ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                    }
 
-            const groupName = normalize(arguments[0]);
-            const groupId = normalize(arguments[1]);
-            const groupUrl = normalize(arguments[2]);
-            const exactTerms = [groupName, groupId, groupUrl].filter(Boolean);
+                    const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                        .filter(isVisible)
+                        .map((el) => ({el, text: textFor(el), rect: el.getBoundingClientRect()}))
+                        .filter((item) =>
+                            item.text.includes('chia sẻ lên nhóm') ||
+                            item.text.includes('share to groups') ||
+                            item.text.includes('chọn nhóm') ||
+                            item.text.includes('select groups') ||
+                            item.text.includes('đăng trong tối đa')
+                        )
+                        .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
 
-            function isVisible(el) {
-                const rect = el.getBoundingClientRect();
-                const style = window.getComputedStyle(el);
-                return rect.width > 20 && rect.height > 12 &&
-                    style.display !== 'none' &&
-                    style.visibility !== 'hidden' &&
-                    Number(style.opacity || 1) > 0;
-            }
+                    if (!dialogs.length) return false;
+                    const root = dialogs[0].el;
+                    const scrollables = Array.from(root.querySelectorAll('div'))
+                        .filter(isVisible)
+                        .filter((el) => el.scrollHeight > el.clientHeight + 40)
+                        .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight));
+                    const scroller = scrollables[0] || root;
+                    scroller.scrollTop = 0;
+                    scroller.dispatchEvent(new Event('scroll', {bubbles: true}));
+                    return true;
+                    """
+                )
+            )
+        except Exception:
+            return False
 
-            function textFor(el) {
-                return [
-                    el.innerText || '',
-                    el.textContent || '',
-                    el.getAttribute('aria-label') || '',
-                    el.getAttribute('href') || ''
-                ].join(' ');
-            }
+    def _scroll_group_picker(self, driver: webdriver.Firefox) -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    """
+                    function isVisible(el) {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 100 && rect.height > 80 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            Number(style.opacity || 1) > 0;
+                    }
 
-            const candidates = Array.from(document.querySelectorAll("div[role='button'], label, a, input[type='checkbox']"))
-                .filter(isVisible)
-                .filter((el) => {
-                    const text = normalize(textFor(el));
-                    if (!exactTerms.some((term) => text.includes(term))) return false;
-                    return !text.includes('search') && !text.includes('tìm kiếm');
-                });
+                    function textFor(el) {
+                        return [
+                            el.innerText || '',
+                            el.textContent || '',
+                            el.getAttribute('aria-label') || ''
+                        ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                    }
 
-            let target = candidates[0];
-            if (!target) return false;
-            const button = target.closest("div[role='button'], label") || target;
-            button.scrollIntoView({block: 'center'});
-            button.click();
-            return true;
-            """,
-            group_name,
-            group_id,
-            group_url,
-        )
-        return bool(clicked)
+                    const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                        .filter(isVisible)
+                        .map((el) => ({el, text: textFor(el), rect: el.getBoundingClientRect()}))
+                        .filter((item) =>
+                            item.text.includes('chia sẻ lên nhóm') ||
+                            item.text.includes('share to groups') ||
+                            item.text.includes('chọn nhóm') ||
+                            item.text.includes('select groups') ||
+                            item.text.includes('đăng trong tối đa')
+                        )
+                        .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
+
+                    if (!dialogs.length) return false;
+                    const root = dialogs[0].el;
+                    const scrollables = Array.from(root.querySelectorAll('div'))
+                        .filter(isVisible)
+                        .filter((el) => el.scrollHeight > el.clientHeight + 40)
+                        .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight));
+                    const scroller = scrollables[0] || root;
+                    const before = scroller.scrollTop;
+                    scroller.scrollTop = Math.min(scroller.scrollTop + Math.max(220, scroller.clientHeight * 0.7), scroller.scrollHeight);
+                    scroller.dispatchEvent(new Event('scroll', {bubbles: true}));
+                    return scroller.scrollTop > before;
+                    """
+                )
+            )
+        except Exception:
+            return False
 
     def _click_group_row_checkbox(
         self,
@@ -902,13 +957,28 @@ class FacebookPost:
                     return row;
                 }
 
-                const candidates = Array.from(document.querySelectorAll("div[role='button'], label, a, input[type='checkbox'], div"))
+                const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                    .filter(isVisible)
+                    .map((el) => ({el, text: normalize(textFor(el)), rect: el.getBoundingClientRect()}))
+                    .filter((item) =>
+                        item.text.includes('chia se len nhom') ||
+                        item.text.includes('share to groups') ||
+                        item.text.includes('chon nhom') ||
+                        item.text.includes('select groups') ||
+                        item.text.includes('dang trong toi da')
+                    )
+                    .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
+                if (!dialogs.length) return null;
+                const root = dialogs[0].el;
+
+                const candidates = Array.from(root.querySelectorAll("div[role='button'], label, input[type='checkbox'], div"))
                     .filter(isVisible)
                     .filter((el) => {
                         const text = normalize(textFor(el));
                         return terms.some((term) => text.includes(term)) &&
                             !text.includes('search') &&
-                            !text.includes('tìm kiếm');
+                            !text.includes('tim kiem') &&
+                            !text.includes('facebook.com/groups/');
                     })
                     .map(rowFor)
                     .filter(isVisible)
@@ -1019,13 +1089,28 @@ class FacebookPost:
                         return text.includes('selected') || text.includes('da chon');
                     }
 
-                    const candidates = Array.from(document.querySelectorAll("div[role='button'], label, a, input[type='checkbox'], div"))
+                    const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [aria-modal='true']"))
+                        .filter(isVisible)
+                        .map((el) => ({el, text: normalize(textFor(el)), rect: el.getBoundingClientRect()}))
+                        .filter((item) =>
+                            item.text.includes('chia se len nhom') ||
+                            item.text.includes('share to groups') ||
+                            item.text.includes('chon nhom') ||
+                            item.text.includes('select groups') ||
+                            item.text.includes('dang trong toi da')
+                        )
+                        .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
+                    if (!dialogs.length) return false;
+                    const root = dialogs[0].el;
+
+                    const candidates = Array.from(root.querySelectorAll("div[role='button'], label, input[type='checkbox'], div"))
                         .filter(isVisible)
                         .filter((el) => {
                             const text = normalize(textFor(el));
                             return terms.some((term) => text.includes(term)) &&
                                 !text.includes('search') &&
-                                !text.includes('tìm kiếm');
+                                !text.includes('tim kiem') &&
+                                !text.includes('facebook.com/groups/');
                         });
 
                     for (const candidate of candidates) {
