@@ -78,8 +78,7 @@ class YouTubeCommunityPost:
             time.sleep(8)
 
             self._activate_composer(driver)
-            editor = self._find_editor(driver)
-            self._set_text(driver, editor, text)
+            self._set_text_in_active_composer(driver, text)
 
             if image_path:
                 self._attach_image(driver, image_path)
@@ -239,9 +238,8 @@ class YouTubeCommunityPost:
 
     def _click_community_prompt(self, driver: webdriver.Firefox) -> bool:
         try:
-            return bool(
-                driver.execute_script(
-                    """
+            target = driver.execute_script(
+                """
                     function isVisible(el) {
                         const rect = el.getBoundingClientRect();
                         const style = window.getComputedStyle(el);
@@ -260,26 +258,8 @@ class YouTubeCommunityPost:
                         ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
                     }
 
-                    function clickElement(el) {
-                        const rect = el.getBoundingClientRect();
-                        const x = rect.left + rect.width / 2;
-                        const y = rect.top + rect.height / 2;
-                        el.scrollIntoView({block: 'center'});
-                        for (const eventName of ['mouseover', 'mousedown', 'mouseup', 'click']) {
-                            el.dispatchEvent(new MouseEvent(eventName, {
-                                bubbles: true,
-                                cancelable: true,
-                                view: window,
-                                clientX: x,
-                                clientY: y
-                            }));
-                        }
-                        return true;
-                    }
-
                     const promptMarkers = [
                         'bạn đang nghĩ gì',
-                        'ban dang nghi gi',
                         'what are you thinking',
                         'share something'
                     ];
@@ -296,16 +276,55 @@ class YouTubeCommunityPost:
                             return areaB - areaA;
                         });
 
-                    if (!candidates.length) return false;
-                    let target = candidates[0].el.closest("div[role='button'], ytd-backstage-post-thread-renderer, ytd-backstage-post-dialog-renderer") || candidates[0].el;
-                    return clickElement(target);
-                    """
-                )
+                    if (!candidates.length) return null;
+                    return candidates[0].el.closest("div[role='button'], button, ytd-backstage-post-renderer") || candidates[0].el;
+                """
             )
+            if not target:
+                return False
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target)
+            time.sleep(0.5)
+            try:
+                target.click()
+            except Exception:
+                driver.execute_script("arguments[0].click();", target)
+            return True
         except Exception:
             return False
 
-    def _find_editor(self, driver: webdriver.Firefox) -> WebElement:
+    def _set_text_in_active_composer(self, driver: webdriver.Firefox, text: str) -> None:
+        last_error: Exception | None = None
+        for _ in range(3):
+            try:
+                editor = self._find_editor(driver, timeout=8)
+                self._set_text(driver, editor, text)
+                if self._editor_has_text(driver, text):
+                    return
+            except Exception as exc:
+                last_error = exc
+
+            self._click_community_prompt(driver)
+            time.sleep(1)
+            try:
+                self._type_text_to_active_element(driver, text)
+                if self._editor_has_text(driver, text):
+                    return
+            except Exception as exc:
+                last_error = exc
+
+            try:
+                if self._set_text_by_dom_without_editor(driver, text):
+                    time.sleep(1)
+                    if self._editor_has_text(driver, text):
+                        return
+            except Exception as exc:
+                last_error = exc
+
+        if last_error:
+            raise RuntimeError(f"YouTube Community editor did not accept the post text: {last_error}")
+        raise RuntimeError("YouTube Community editor did not accept the post text.")
+
+    def _find_editor(self, driver: webdriver.Firefox, timeout: int = 45) -> WebElement:
         def find(current_driver: webdriver.Firefox):
             editor = current_driver.execute_script(
                 """
@@ -339,14 +358,23 @@ class YouTubeCommunityPost:
                 }
                 if (isEditor(document.activeElement)) return document.activeElement;
                 const candidates = Array.from(document.querySelectorAll(
-                    "textarea, ytcp-social-suggestions-textbox, yt-emoji-input, [contenteditable='true'], div[role='textbox'], [aria-label*='Bạn đang nghĩ'], [aria-label*='What are you thinking']"
+                    "textarea, ytcp-social-suggestions-textbox, yt-emoji-input, #contenteditable-root, [contenteditable='true'], div[role='textbox'], [aria-label*='Bạn đang nghĩ'], [aria-label*='What are you thinking']"
                 )).filter(isEditor);
                 return candidates.length ? candidates[candidates.length - 1] : null;
                 """
             )
             return editor or False
 
-        return WebDriverWait(driver, 45).until(find)
+        return WebDriverWait(driver, timeout).until(find)
+
+    def _type_text_to_active_element(self, driver: webdriver.Firefox, text: str) -> None:
+        active = driver.switch_to.active_element
+        modifier_key = Keys.COMMAND if platform.system() == "Darwin" else Keys.CONTROL
+        ActionChains(driver).key_down(modifier_key).send_keys("a").key_up(modifier_key).perform()
+        active.send_keys(Keys.BACKSPACE)
+        time.sleep(0.3)
+        active.send_keys(text)
+        time.sleep(1)
 
     def _set_text(self, driver: webdriver.Firefox, editor: WebElement, text: str) -> None:
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", editor)
@@ -411,6 +439,63 @@ class YouTubeCommunityPost:
             """,
             editor,
             text,
+        )
+
+    def _set_text_by_dom_without_editor(
+        self,
+        driver: webdriver.Firefox,
+        text: str,
+    ) -> bool:
+        return bool(
+            driver.execute_script(
+                """
+                const value = arguments[0];
+                function isVisible(el) {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width > 40 && rect.height > 20 &&
+                        style.display !== 'none' &&
+                        style.visibility !== 'hidden' &&
+                        Number(style.opacity || 1) > 0;
+                }
+                function textFor(el) {
+                    return [
+                        el.innerText || '',
+                        el.textContent || '',
+                        el.getAttribute('aria-label') || '',
+                        el.getAttribute('placeholder') || ''
+                    ].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+                }
+                const candidates = Array.from(document.querySelectorAll(
+                    "textarea, ytcp-social-suggestions-textbox, yt-emoji-input, #contenteditable-root, [contenteditable='true'], div[role='textbox']"
+                ))
+                    .filter(isVisible)
+                    .filter((el) => {
+                        const text = textFor(el);
+                        return !text.includes('tìm kiếm') && !text.includes('search');
+                    });
+                const el = candidates[candidates.length - 1] || document.activeElement;
+                if (!el) return false;
+                el.focus();
+                if ('value' in el) {
+                    el.value = value;
+                } else if (el.isContentEditable) {
+                    el.innerText = value;
+                } else {
+                    const editable = el.querySelector("[contenteditable='true'], textarea, div[role='textbox']") || el;
+                    if ('value' in editable) {
+                        editable.value = value;
+                    } else {
+                        editable.innerText = value;
+                    }
+                }
+                for (const eventName of ['beforeinput', 'input', 'change', 'keyup', 'blur']) {
+                    el.dispatchEvent(new Event(eventName, {bubbles: true}));
+                }
+                return true;
+                """,
+                text,
+            )
         )
 
     def _attach_image(self, driver: webdriver.Firefox, image_path: str) -> None:
