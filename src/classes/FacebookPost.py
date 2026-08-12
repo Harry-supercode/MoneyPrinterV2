@@ -643,101 +643,146 @@ class FacebookPost:
             return False
 
     def _select_group(self, driver: webdriver.Firefox, target: dict[str, str]) -> bool:
-        group_name = target.get("name", "")
-        group_id = target.get("id", "")
-        group_url = target.get("url", "")
-        search_terms = [term for term in [group_name, group_id, group_url] if term]
-
         if not self._target_group_visible(driver, target):
+            group_name = target.get("name", "")
+            group_id = target.get("id", "")
+            group_url = target.get("url", "")
+            search_terms = [term for term in [group_name, group_id, group_url] if term]
             self._try_search_group(driver, search_terms[0] if search_terms else "")
             time.sleep(2)
 
-        clicked = driver.execute_script(
-            """
-            function normalize(value) {
-                return String(value || '')
-                    .normalize('NFD')
-                    .replace(/[\\u0300-\\u036f]/g, '')
-                    .replace(/đ/g, 'd')
-                    .replace(/Đ/g, 'd')
-                    .toLowerCase();
-            }
+        if self._target_group_is_selected(driver, target):
+            return True
 
-            const groupName = normalize(arguments[0]);
-            const groupId = normalize(arguments[1]);
-            const groupUrl = normalize(arguments[2]);
-            const exactTerms = [groupName, groupId, groupUrl].filter(Boolean);
+        row = self._find_target_group_row(driver, target)
+        if row is None:
+            return False
 
-            function isVisible(el) {
-                const rect = el.getBoundingClientRect();
-                const style = window.getComputedStyle(el);
-                return rect.width > 20 && rect.height > 12 &&
-                    style.display !== 'none' &&
-                    style.visibility !== 'hidden' &&
-                    Number(style.opacity || 1) > 0;
-            }
-
-            function textFor(el) {
-                return [
-                    el.innerText || '',
-                    el.textContent || '',
-                    el.getAttribute('aria-label') || '',
-                    el.getAttribute('aria-checked') || '',
-                    el.getAttribute('aria-label') || '',
-                    el.getAttribute('href') || ''
-                ].join(' ');
-            }
-
-            function rowFor(el) {
-                let row = el.closest("div[role='button'], label") || el;
-                let probe = el;
-                for (let depth = 0; depth < 8 && probe; depth += 1) {
-                    const rect = probe.getBoundingClientRect();
-                    const text = normalize(textFor(probe));
-                    if (
-                        rect.width > 300 &&
-                        rect.height > 40 &&
-                        rect.height < 140 &&
-                        exactTerms.some((term) => text.includes(term))
-                    ) {
-                        row = probe;
-                    }
-                    probe = probe.parentElement;
-                }
-                return row;
-            }
-
-            function isSelected(el) {
-                const selected = Array.from(el.querySelectorAll("[aria-checked='true'], input[type='checkbox']:checked"))
-                    .some(isVisible);
-                return selected ||
-                    el.getAttribute('aria-checked') === 'true' ||
-                    normalize(textFor(el)).includes('selected') ||
-                    normalize(textFor(el)).includes('da chon');
-            }
-
-            const candidates = Array.from(document.querySelectorAll("div[role='button'], label, a, input[type='checkbox']"))
-                .filter(isVisible)
-                .filter((el) => {
-                    const text = normalize(textFor(el));
-                    if (!exactTerms.some((term) => text.includes(term))) return false;
-                    return !text.includes('search') && !text.includes('tìm kiếm');
-                });
-
-            let target = candidates[0];
-            if (!target) return false;
-            const button = rowFor(target);
-            button.scrollIntoView({block: 'center'});
-            if (isSelected(button)) return true;
-            button.click();
-            return true;
-            """,
-            group_name,
-            group_id,
-            group_url,
-        )
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", row)
         time.sleep(1)
-        return bool(clicked) and self._target_group_is_selected(driver, target)
+
+        for attempt in range(3):
+            if attempt == 0:
+                self._native_click_row_right_edge(driver, row)
+            elif attempt == 1:
+                self._click_element_right_edge(driver, row)
+            else:
+                try:
+                    ActionChains(driver).move_to_element(row).click().perform()
+                except Exception:
+                    pass
+
+            time.sleep(1)
+            if self._target_group_is_selected(driver, target):
+                return True
+
+        return False
+
+    def _native_click_row_right_edge(
+        self,
+        driver: webdriver.Firefox,
+        row: WebElement,
+    ) -> bool:
+        try:
+            rect = driver.execute_script(
+                """
+                const rect = arguments[0].getBoundingClientRect();
+                return {width: rect.width, height: rect.height};
+                """,
+                row,
+            )
+            ActionChains(driver).move_to_element_with_offset(
+                row,
+                int(rect["width"] / 2 - 28),
+                0,
+            ).click().perform()
+            return True
+        except Exception:
+            return False
+
+    def _find_target_group_row(
+        self,
+        driver: webdriver.Firefox,
+        target: dict[str, str],
+    ) -> WebElement | None:
+        try:
+            return driver.execute_script(
+                """
+                function normalize(value) {
+                    return String(value || '')
+                        .normalize('NFD')
+                        .replace(/[\\u0300-\\u036f]/g, '')
+                        .replace(/đ/g, 'd')
+                        .replace(/Đ/g, 'd')
+                        .toLowerCase();
+                }
+
+                const terms = [arguments[0], arguments[1], arguments[2]]
+                    .map(normalize)
+                    .filter(Boolean);
+                if (!terms.length) return null;
+
+                function isVisible(el) {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width > 20 && rect.height > 12 &&
+                        style.display !== 'none' &&
+                        style.visibility !== 'hidden' &&
+                        Number(style.opacity || 1) > 0;
+                }
+
+                function textFor(el) {
+                    return [
+                        el.innerText || '',
+                        el.textContent || '',
+                        el.getAttribute('aria-label') || '',
+                        el.getAttribute('href') || ''
+                    ].join(' ');
+                }
+
+                function rowFor(el) {
+                    let row = el.closest("div[role='button'], label") || el;
+                    let probe = el;
+                    for (let depth = 0; depth < 10 && probe; depth += 1) {
+                        const rect = probe.getBoundingClientRect();
+                        const text = normalize(textFor(probe));
+                        if (
+                            rect.width > 300 &&
+                            rect.height > 40 &&
+                            rect.height < 180 &&
+                            terms.some((term) => text.includes(term))
+                        ) {
+                            row = probe;
+                        }
+                        probe = probe.parentElement;
+                    }
+                    return row;
+                }
+
+                const candidates = Array.from(document.querySelectorAll("div[role='button'], label, a, input[type='checkbox'], div"))
+                    .filter(isVisible)
+                    .filter((el) => {
+                        const text = normalize(textFor(el));
+                        return terms.some((term) => text.includes(term)) &&
+                            !text.includes('search') &&
+                            !text.includes('tìm kiếm');
+                    })
+                    .map(rowFor)
+                    .filter(isVisible)
+                    .sort((a, b) => {
+                        const ar = a.getBoundingClientRect();
+                        const br = b.getBoundingClientRect();
+                        return (br.width * br.height) - (ar.width * ar.height);
+                    });
+
+                return candidates[0] || null;
+                """,
+                target.get("name", ""),
+                target.get("id", ""),
+                target.get("url", ""),
+            )
+        except Exception:
+            return None
 
     def _target_group_visible(
         self,
