@@ -579,8 +579,23 @@ class YouTubeCommunityPost:
         ]
         target_input = image_inputs[-1] if image_inputs else file_inputs[-1]
         target_input.send_keys(os.path.abspath(image_path))
-        if not self._wait_for_image_attachment(driver, text, before_preview_count):
+        if not self._wait_for_image_attachment(driver, text, before_preview_count, target_input):
             raise RuntimeError("YouTube Community image did not attach before publishing.")
+
+    def _file_input_has_file(
+        self,
+        driver: webdriver.Firefox,
+        file_input: WebElement,
+    ) -> bool:
+        try:
+            return bool(
+                driver.execute_script(
+                    "return Boolean(arguments[0] && arguments[0].files && arguments[0].files.length > 0);",
+                    file_input,
+                )
+            )
+        except Exception:
+            return False
 
     def _click_image_button_in_composer(
         self,
@@ -684,7 +699,7 @@ class YouTubeCommunityPost:
                         ? window.__mpv2FindYouTubeCommunityRoots(sample)
                         : [];
                     const root = roots[0]?.el || document;
-                    return Array.from(root.querySelectorAll('img, video, canvas, ytd-thumbnail, yt-img-shadow'))
+                    const scopedCount = Array.from(root.querySelectorAll('img, video, canvas, ytd-thumbnail, yt-img-shadow'))
                         .filter((el) => {
                             const rect = el.getBoundingClientRect();
                             const style = window.getComputedStyle(el);
@@ -693,6 +708,16 @@ class YouTubeCommunityPost:
                                 style.visibility !== 'hidden' &&
                                 Number(style.opacity || 1) > 0;
                         }).length;
+                    const blobCount = Array.from(document.querySelectorAll('img[src^="blob:"], img[src^="data:"], video[src^="blob:"], canvas'))
+                        .filter((el) => {
+                            const rect = el.getBoundingClientRect();
+                            const style = window.getComputedStyle(el);
+                            return rect.width > 40 && rect.height > 40 &&
+                                style.display !== 'none' &&
+                                style.visibility !== 'hidden' &&
+                                Number(style.opacity || 1) > 0;
+                        }).length;
+                    return Math.max(scopedCount, blobCount);
                     """,
                     text.strip()[:80],
                 )
@@ -706,11 +731,18 @@ class YouTubeCommunityPost:
         driver: webdriver.Firefox,
         text: str,
         before_preview_count: int,
+        file_input: WebElement,
     ) -> bool:
         deadline = time.time() + 45
+        file_selected_at = 0.0
         while time.time() < deadline:
             if self._image_preview_count(driver, text) > before_preview_count:
                 return True
+            if self._file_input_has_file(driver, file_input):
+                if file_selected_at <= 0:
+                    file_selected_at = time.time()
+                if time.time() - file_selected_at >= 12:
+                    return True
             time.sleep(2)
         return False
 
