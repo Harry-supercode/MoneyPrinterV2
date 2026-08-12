@@ -14,6 +14,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.remote.webelement import WebElement
+from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.firefox import GeckoDriverManager
 
@@ -1410,17 +1411,28 @@ class FacebookPost:
             else:
                 raise
 
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
-        time.sleep(1)
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+            time.sleep(1)
+        except StaleElementReferenceException:
+            button = self._find_publish_button(driver, 10)
 
-        for attempt in range(3):
+        for attempt in range(5):
             if self._dismiss_blocking_facebook_prompts(driver):
                 time.sleep(2)
                 button = self._find_publish_button(driver, 20)
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
-                time.sleep(1)
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                    time.sleep(1)
+                except StaleElementReferenceException:
+                    button = self._find_publish_button(driver, 10)
+                    continue
 
-            driver.execute_script("arguments[0].click();", button)
+            try:
+                driver.execute_script("arguments[0].click();", button)
+            except StaleElementReferenceException:
+                button = self._find_publish_button(driver, 10)
+                continue
             time.sleep(2)
             if self._dismiss_post_publish_prompt(driver):
                 time.sleep(5)
@@ -1431,7 +1443,7 @@ class FacebookPost:
             time.sleep(1)
             if not self._composer_is_open(driver):
                 return
-            if attempt < 2:
+            if attempt < 4:
                 try:
                     button = self._find_publish_button(driver, 10)
                 except Exception:
