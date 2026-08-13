@@ -567,35 +567,48 @@ class YouTubeCommunityPost:
         if not self._click_image_button_in_composer(driver, text):
             self._try_click_button(driver, YOUTUBE_IMAGE_MARKERS, "Image", 15)
         time.sleep(2)
-        file_inputs = driver.find_elements(By.XPATH, "//input[@type='file']")
-
-        if not file_inputs:
+        target_input = self._find_community_image_file_input(driver, text)
+        if not target_input:
             raise RuntimeError("Could not find YouTube Community image file input.")
 
-        image_inputs = [
-            file_input
-            for file_input in file_inputs
-            if "image" in (file_input.get_attribute("accept") or "").lower()
-        ]
-        target_input = image_inputs[-1] if image_inputs else file_inputs[-1]
         target_input.send_keys(os.path.abspath(image_path))
-        if not self._wait_for_image_attachment(driver, text, before_preview_count, target_input):
+        if not self._wait_for_image_attachment(driver, text, before_preview_count):
             raise RuntimeError("YouTube Community image did not attach before publishing.")
 
-    def _file_input_has_file(
+    def _find_community_image_file_input(
         self,
         driver: webdriver.Firefox,
-        file_input: WebElement,
-    ) -> bool:
+        text: str,
+    ) -> WebElement | None:
+        sample = text.strip()[:80]
         try:
-            return bool(
-                driver.execute_script(
-                    "return Boolean(arguments[0] && arguments[0].files && arguments[0].files.length > 0);",
-                    file_input,
-                )
+            return driver.execute_script(
+                """
+                const sample = String(arguments[0] || '').toLowerCase();
+
+                function isUsableImageInput(el) {
+                    if (!el || String(el.type || '').toLowerCase() !== 'file') return false;
+                    const accept = String(el.getAttribute('accept') || '').toLowerCase();
+                    return !accept || accept.includes('image') || accept.includes('png') || accept.includes('jpeg') || accept.includes('jpg');
+                }
+
+                const roots = window.__mpv2FindYouTubeCommunityRoots
+                    ? window.__mpv2FindYouTubeCommunityRoots(sample)
+                    : [];
+                for (const root of roots) {
+                    const inputs = Array.from(root.el.querySelectorAll('input[type="file"]'))
+                        .filter(isUsableImageInput);
+                    if (inputs.length) return inputs[inputs.length - 1];
+                }
+
+                const allImageInputs = Array.from(document.querySelectorAll('input[type="file"]'))
+                    .filter(isUsableImageInput);
+                return allImageInputs.length ? allImageInputs[allImageInputs.length - 1] : null;
+                """,
+                sample,
             )
         except Exception:
-            return False
+            return None
 
     def _click_image_button_in_composer(
         self,
@@ -731,18 +744,11 @@ class YouTubeCommunityPost:
         driver: webdriver.Firefox,
         text: str,
         before_preview_count: int,
-        file_input: WebElement,
     ) -> bool:
-        deadline = time.time() + 45
-        file_selected_at = 0.0
+        deadline = time.time() + 75
         while time.time() < deadline:
             if self._image_preview_count(driver, text) > before_preview_count:
                 return True
-            if self._file_input_has_file(driver, file_input):
-                if file_selected_at <= 0:
-                    file_selected_at = time.time()
-                if time.time() - file_selected_at >= 12:
-                    return True
             time.sleep(2)
         return False
 
