@@ -711,26 +711,23 @@ class YouTubeCommunityPost:
                     const roots = window.__mpv2FindYouTubeCommunityRoots
                         ? window.__mpv2FindYouTubeCommunityRoots(sample)
                         : [];
-                    const root = roots[0]?.el || document;
-                    const scopedCount = Array.from(root.querySelectorAll('img, video, canvas, ytd-thumbnail, yt-img-shadow'))
-                        .filter((el) => {
-                            const rect = el.getBoundingClientRect();
-                            const style = window.getComputedStyle(el);
-                            return rect.width > 40 && rect.height > 40 &&
-                                style.display !== 'none' &&
-                                style.visibility !== 'hidden' &&
-                                Number(style.opacity || 1) > 0;
-                        }).length;
-                    const blobCount = Array.from(document.querySelectorAll('img[src^="blob:"], img[src^="data:"], video[src^="blob:"], canvas'))
-                        .filter((el) => {
-                            const rect = el.getBoundingClientRect();
-                            const style = window.getComputedStyle(el);
-                            return rect.width > 40 && rect.height > 40 &&
-                                style.display !== 'none' &&
-                                style.visibility !== 'hidden' &&
-                                Number(style.opacity || 1) > 0;
-                        }).length;
-                    return Math.max(scopedCount, blobCount);
+
+                    function visibleMediaCount(root) {
+                        return Array.from(root.querySelectorAll(
+                            'img, img[src^="blob:"], img[src^="data:"], video, video[src^="blob:"], canvas, ytd-thumbnail, yt-img-shadow'
+                        ))
+                            .filter((el) => {
+                                const rect = el.getBoundingClientRect();
+                                const style = window.getComputedStyle(el);
+                                return rect.width > 40 && rect.height > 40 &&
+                                    style.display !== 'none' &&
+                                    style.visibility !== 'hidden' &&
+                                    Number(style.opacity || 1) > 0;
+                            }).length;
+                    }
+
+                    if (!roots.length) return 0;
+                    return roots.reduce((maxCount, root) => Math.max(maxCount, visibleMediaCount(root.el)), 0);
                     """,
                     text.strip()[:80],
                 )
